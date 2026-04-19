@@ -4,6 +4,8 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { DefaultChatTransport, type ChatStatus, type UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
 import { signOut } from "next-auth/react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Activity,
   ArrowRight,
@@ -247,6 +249,18 @@ function outputBadges(output: AgentToolOutput) {
     output.snapshots?.length ? `${output.snapshots.length} snapshots` : "",
     output.signals?.length ? `${output.signals.length} signals` : ""
   ].filter(Boolean);
+}
+
+function isVisibleMessagePart(part: UIMessage["parts"][number], showStepStart: boolean) {
+  if (part.type === "text") {
+    return part.text.trim().length > 0;
+  }
+
+  if (part.type === "step-start") {
+    return showStepStart;
+  }
+
+  return Boolean(asToolPart(part));
 }
 
 export function CounterOSDashboard({
@@ -1543,6 +1557,9 @@ function AgentView({
   const visibleSuggestions = suggestions.slice(0, 3);
   const visibleArtifacts = artifacts.slice(0, 3);
   const visibleTrackedPages = trackedPages.slice(0, 3);
+  const lastAssistantMessageId = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant")?.id;
   const hasOutputs =
     visibleSuggestions.length > 0 ||
     visibleArtifacts.length > 0 ||
@@ -1587,7 +1604,11 @@ function AgentView({
                 />
               )}
               {messages.map((message) => (
-                <AgentChatMessage key={message.id} message={message} />
+                <AgentChatMessage
+                  key={message.id}
+                  message={message}
+                  isActive={isBusy && message.id === lastAssistantMessageId}
+                />
               ))}
               {status === "submitted" && <AgentPendingMessage />}
               {error && (
@@ -1678,8 +1699,22 @@ function AgentView({
   );
 }
 
-function AgentChatMessage({ message }: { message: UIMessage }) {
+function AgentChatMessage({
+  message,
+  isActive
+}: {
+  message: UIMessage;
+  isActive: boolean;
+}) {
   const isUser = message.role === "user";
+  const lastPartIndex = message.parts.length - 1;
+  const hasVisibleContent = message.parts.some((part, index) =>
+    isVisibleMessagePart(part, isActive && index === lastPartIndex)
+  );
+
+  if (!hasVisibleContent) {
+    return null;
+  }
 
   return (
     <div
@@ -1698,7 +1733,12 @@ function AgentChatMessage({ message }: { message: UIMessage }) {
       </span>
       <div className="grid gap-3">
         {message.parts.map((part, index) => (
-          <AgentMessagePart key={`${message.id}-${index}`} part={part} isUser={isUser} />
+          <AgentMessagePart
+            key={`${message.id}-${index}`}
+            part={part}
+            isUser={isUser}
+            showStepStart={isActive && index === lastPartIndex}
+          />
         ))}
       </div>
     </div>
@@ -1707,25 +1747,22 @@ function AgentChatMessage({ message }: { message: UIMessage }) {
 
 function AgentMessagePart({
   part,
-  isUser
+  isUser,
+  showStepStart
 }: {
   part: UIMessage["parts"][number];
   isUser: boolean;
+  showStepStart: boolean;
 }) {
   if (part.type === "text") {
-    return (
-      <p
-        className={cn(
-          "m-0 whitespace-pre-wrap text-sm leading-6",
-          isUser ? "text-primary-foreground" : "text-foreground"
-        )}
-      >
-        {part.text}
-      </p>
-    );
+    return <MarkdownContent text={part.text} isUser={isUser} />;
   }
 
   if (part.type === "step-start") {
+    if (!showStepStart) {
+      return null;
+    }
+
     return (
       <div className="grid grid-cols-[28px_minmax(0,1fr)] gap-3 rounded-lg border bg-background/80 px-3 py-2">
         <div className="grid size-7 place-items-center rounded-full border bg-card">
@@ -1751,6 +1788,89 @@ function AgentMessagePart({
   }
 
   return null;
+}
+
+function MarkdownContent({ text, isUser }: { text: string; isUser: boolean }) {
+  const subtleText = isUser ? "text-primary-foreground/78" : "text-muted-foreground";
+  const borderClass = isUser ? "border-primary-foreground/22" : "border-border";
+  const mutedSurface = isUser ? "bg-primary-foreground/10" : "bg-muted/60";
+  const linkClass = isUser
+    ? "text-primary-foreground underline underline-offset-4"
+    : "text-primary underline underline-offset-4";
+
+  return (
+    <div
+      className={cn(
+        "min-w-0 break-words text-sm leading-6",
+        isUser ? "text-primary-foreground" : "text-foreground"
+      )}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => <p className="m-0 mb-2 last:mb-0">{children}</p>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          a: ({ children, href }) => (
+            <a className={linkClass} href={href} rel="noreferrer" target="_blank">
+              {children}
+            </a>
+          ),
+          ul: ({ children }) => (
+            <ul className="m-0 mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="m-0 mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>
+          ),
+          li: ({ children }) => <li className="pl-1">{children}</li>,
+          blockquote: ({ children }) => (
+            <blockquote className={cn("m-0 mb-2 border-l-2 pl-3 last:mb-0", borderClass, subtleText)}>
+              {children}
+            </blockquote>
+          ),
+          code: ({ children, className }) => (
+            <code
+              className={cn(
+                "rounded-md px-1.5 py-0.5 font-mono text-[0.86em]",
+                className ? "block whitespace-pre p-3" : mutedSurface
+              )}
+            >
+              {children}
+            </code>
+          ),
+          pre: ({ children }) => (
+            <pre
+              className={cn(
+                "m-0 mb-2 max-w-full overflow-x-auto rounded-lg p-0 last:mb-0",
+                mutedSurface
+              )}
+            >
+              {children}
+            </pre>
+          ),
+          hr: () => <hr className={cn("my-3", borderClass)} />,
+          h1: ({ children }) => <h1 className="m-0 mb-2 text-base font-semibold">{children}</h1>,
+          h2: ({ children }) => <h2 className="m-0 mb-2 text-base font-semibold">{children}</h2>,
+          h3: ({ children }) => <h3 className="m-0 mb-2 text-sm font-semibold">{children}</h3>,
+          table: ({ children }) => (
+            <div className="mb-2 max-w-full overflow-x-auto last:mb-0">
+              <table className={cn("min-w-full border-collapse text-left text-xs", borderClass)}>
+                {children}
+              </table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th className={cn("border px-2 py-1 font-semibold", borderClass, mutedSurface)}>
+              {children}
+            </th>
+          ),
+          td: ({ children }) => <td className={cn("border px-2 py-1", borderClass)}>{children}</td>
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 function AgentPendingMessage() {
