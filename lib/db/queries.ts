@@ -2,7 +2,9 @@ import { createHash, randomUUID } from "crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
 import type {
   AgentActivity,
+  AgentRunStep,
   Artifact,
+  ChatMessage,
   CompetitorProfile,
   DashboardData,
   Evidence,
@@ -75,6 +77,74 @@ export function createUser(input: {
   return createdUser;
 }
 
+export function createUserWithEmptyWorkspace(input: {
+  email: string;
+  name?: string | null;
+  passwordHash: string;
+}) {
+  const userId = randomUUID();
+  const email = input.email.toLowerCase();
+  const name = input.name?.trim() || null;
+  const displayName = name || email.split("@")[0] || "Founder";
+  const user = {
+    id: userId,
+    email,
+    name,
+    passwordHash: input.passwordHash
+  };
+  const workspace = {
+    id: randomUUID(),
+    userId,
+    name: `${displayName}'s CounterOS workspace`
+  };
+
+  db.transaction((tx) => {
+    tx.insert(users).values(user).run();
+    tx.insert(workspaces).values(workspace).run();
+  });
+
+  const createdUser = findUserById(userId);
+  const createdWorkspace = getDefaultWorkspace(userId);
+
+  if (!createdUser || !createdWorkspace) {
+    throw new Error("Failed to create account workspace");
+  }
+
+  return {
+    user: createdUser,
+    workspace: createdWorkspace
+  };
+}
+
+export function createEmptyWorkspaceForUser(
+  userId: string,
+  email: string,
+  name?: string | null
+) {
+  const existingWorkspace = getDefaultWorkspace(userId);
+
+  if (existingWorkspace) {
+    return existingWorkspace;
+  }
+
+  const displayName = name?.trim() || email.split("@")[0] || "Founder";
+  const workspace = {
+    id: randomUUID(),
+    userId,
+    name: `${displayName}'s CounterOS workspace`
+  };
+
+  db.insert(workspaces).values(workspace).run();
+
+  const createdWorkspace = getDefaultWorkspace(userId);
+
+  if (!createdWorkspace) {
+    throw new Error("Failed to create workspace");
+  }
+
+  return createdWorkspace;
+}
+
 export function getDefaultWorkspace(userId: string) {
   return db
     .select()
@@ -98,10 +168,6 @@ export function getDashboardData(userId: string): DashboardData {
     .where(eq(productProfiles.workspaceId, workspace.id))
     .limit(1)
     .get();
-
-  if (!profile) {
-    throw new Error("No product profile found for workspace");
-  }
 
   const suggestionRows = db
     .select()
@@ -162,7 +228,7 @@ export function getDashboardData(userId: string): DashboardData {
       id: workspace.id,
       name: workspace.name
     },
-    productProfile: mapProductProfile(profile),
+    productProfile: profile ? mapProductProfile(profile) : null,
     suggestedCompetitors: suggestionRows.map(mapSuggestion),
     approvedCompetitors: competitorRows.map(mapCompetitor),
     signals: signalData,
@@ -192,6 +258,25 @@ export function getProductProfile(workspaceId: string): ProductProfile | null {
     .get();
 
   return profile ? mapProductProfile(profile) : null;
+}
+
+export function createProductProfile(input: {
+  workspaceId: string;
+  profile: ProductProfile;
+}): ProductProfile {
+  db.insert(productProfiles).values({
+    id: randomUUID(),
+    workspaceId: input.workspaceId,
+    ...input.profile
+  }).run();
+
+  const created = getProductProfile(input.workspaceId);
+
+  if (!created) {
+    throw new Error("Failed to create product profile");
+  }
+
+  return created;
 }
 
 export function updateProductProfile(input: {
@@ -617,6 +702,36 @@ export function getWorkspaceAgentContext(workspaceId: string) {
   };
 }
 
+export function listRecentChatMessages(
+  workspaceId: string,
+  limit = 8
+): ChatMessage[] {
+  const chat = db
+    .select()
+    .from(chats)
+    .where(eq(chats.workspaceId, workspaceId))
+    .orderBy(asc(chats.createdAt))
+    .limit(1)
+    .get();
+
+  if (!chat) {
+    return [];
+  }
+
+  const messageRows = db
+    .select()
+    .from(messages)
+    .where(eq(messages.chatId, chat.id))
+    .orderBy(asc(messages.createdAt))
+    .all();
+
+  return messageRows.slice(-limit).map((message): ChatMessage => ({
+    id: message.id,
+    role: message.role as "agent" | "user",
+    text: message.content
+  }));
+}
+
 export function listTrackedPages(workspaceId: string): TrackedPage[] {
   return db
     .select()
@@ -947,6 +1062,7 @@ export function appendChatTurn(input: {
   workspaceId: string;
   userText: string;
   agentText?: string;
+  agentSteps?: AgentRunStep[];
 }) {
   const chat =
     db
@@ -977,7 +1093,12 @@ export function appendChatTurn(input: {
 
   return [
     { id: userMessage.id, role: "user" as const, text: userMessage.content },
-    { id: agentMessage.id, role: "agent" as const, text: agentMessage.content }
+    {
+      id: agentMessage.id,
+      role: "agent" as const,
+      text: agentMessage.content,
+      steps: input.agentSteps
+    }
   ];
 }
 

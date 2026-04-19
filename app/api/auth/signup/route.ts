@@ -1,8 +1,10 @@
 import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createDefaultWorkspaceForUser } from "@/lib/db/seed-workspace";
-import { createUser, findUserByEmail } from "@/lib/db/queries";
+import {
+  createUserWithEmptyWorkspace,
+  findUserByEmail
+} from "@/lib/db/queries";
 
 export const runtime = "nodejs";
 
@@ -34,13 +36,11 @@ export async function POST(request: Request) {
   }
 
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
-  const user = createUser({
+  const { user } = createUserWithEmptyWorkspace({
     email,
     name: parsed.data.name,
     passwordHash
   });
-
-  createDefaultWorkspaceForUser(user.id, user.email, user.name);
 
   return NextResponse.json({
     user: {

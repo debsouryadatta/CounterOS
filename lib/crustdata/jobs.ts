@@ -22,7 +22,7 @@ export async function searchJobs<TJob = CrustdataJobData>(
     ...options
   });
 
-  return normalizeResultsEnvelope<TJob>(response);
+  return normalizeResultsEnvelope<TJob>(response, ["job_listings"]);
 }
 
 function assertExplicitFields(fields: readonly string[] | undefined, operation: string) {

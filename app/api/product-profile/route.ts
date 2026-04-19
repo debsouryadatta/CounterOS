@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireWorkspace } from "@/lib/auth/workspace";
-import { getProductProfile, updateProductProfile } from "@/lib/db/queries";
+import {
+  createProductProfile,
+  getProductProfile,
+  updateProductProfile
+} from "@/lib/db/queries";
+import type { ProductProfile } from "@/lib/types";
 import { productProfilePatchSchema } from "@/lib/validation/product";
 
 export const runtime = "nodejs";
@@ -38,6 +43,24 @@ export async function PATCH(request: Request) {
     );
   }
 
+  const existingProfile = getProductProfile(auth.workspace.id);
+
+  if (!existingProfile) {
+    if (!isCompleteProductProfile(parsed.data)) {
+      return NextResponse.json(
+        { error: "Create the first product profile with all profile fields." },
+        { status: 400 }
+      );
+    }
+
+    const productProfile = createProductProfile({
+      workspaceId: auth.workspace.id,
+      profile: parsed.data
+    });
+
+    return NextResponse.json({ productProfile });
+  }
+
   const productProfile = updateProductProfile({
     workspaceId: auth.workspace.id,
     updates: parsed.data
@@ -48,4 +71,17 @@ export async function PATCH(request: Request) {
   }
 
   return NextResponse.json({ productProfile });
+}
+
+function isCompleteProductProfile(
+  value: Partial<ProductProfile>
+): value is ProductProfile {
+  return Boolean(
+    value.name &&
+      value.description &&
+      value.icp &&
+      value.category &&
+      value.geography &&
+      value.wedge
+  );
 }

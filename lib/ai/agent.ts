@@ -1,281 +1,63 @@
 import "server-only";
 
-import { z } from "zod";
-import {
-  createArtifact,
-  createSuggestedCompetitor,
-  getWorkspaceAgentContext,
-  recordAgentActivity
-} from "@/lib/db/queries";
-import type { AgentActivity, Artifact, ChatMessage, SuggestedCompetitor } from "@/lib/types";
-import { normalizeDomain } from "@/lib/validation/competitors";
+import { openai } from "@ai-sdk/openai";
+import { stepCountIs, ToolLoopAgent, type InferAgentUIMessage } from "ai";
+import { getWorkspaceAgentContext } from "@/lib/db/queries";
+import { createCounterOSTools } from "./counteros-tools";
 import { buildCounterOSAgentSystemPrompt } from "./prompts";
-import {
-  agentActivityStepSchema,
-  battlecardArtifactSchema,
-  competitorSuggestionSchema,
-  targetAccountRequestSchema
-} from "./schemas";
-import { createOpenAITextResponse, OpenAIClientError } from "./openai-client";
 
-const agentChatOutputSchema = z
-  .object({
-    reply: z.string().trim().min(1),
-    suggestedCompetitors: z.array(competitorSuggestionSchema).default([]),
-    artifact: z
-      .union([battlecardArtifactSchema, targetAccountRequestSchema])
-      .optional(),
-    activity: z.array(agentActivityStepSchema).default([])
-  })
-  .strict();
-
-export type AgentChatResult = {
-  reply: string;
-  suggestedCompetitors: SuggestedCompetitor[];
-  artifact: Artifact | null;
-  activities: AgentActivity[];
-};
-
-export async function runCounterOSAgentChat(input: {
-  workspaceId: string;
-  userText: string;
-  recentMessages: ChatMessage[];
-}): Promise<AgentChatResult> {
-  if (!process.env.OPENAI_API_KEY) {
-    return {
-      reply:
-        "I saved your message, but OPENAI_API_KEY is not configured for real agent work yet.",
-      suggestedCompetitors: [],
-      artifact: null,
-      activities: [
-        recordAgentActivity({
-          workspaceId: input.workspaceId,
-          label: "Check OpenAI configuration",
-          source: "OpenAI",
-          status: "Needs approval",
-          evidence: "OPENAI_API_KEY is missing, so the agent used the fallback response."
-        })
-      ]
-    };
-  }
-
-  const context = getWorkspaceAgentContext(input.workspaceId);
-  const systemPrompt = buildCounterOSAgentSystemPrompt({
-    productName: context.productProfile?.name,
-    productDescription: context.productProfile?.description,
-    icp: context.productProfile?.icp,
-    category: context.productProfile?.category,
-    geography: context.productProfile?.geography,
-    knownCompetitors: context.competitors.map((competitor) => competitor.name),
-    pendingSuggestions: context.suggestedCompetitors
-      .filter((suggestion) => suggestion.status === "pending")
-      .map((suggestion) => suggestion.name)
-  });
-
-  const instruction = [
-    systemPrompt,
-    "",
-    "Return only JSON with this shape:",
-    JSON.stringify({
-      reply: "A concise founder-facing response.",
-      suggestedCompetitors: [
-        {
-          name: "Company name",
-          domain: "company.com",
-          description: "Why this may be a competitor.",
-          threatType: "Direct",
-          confidence: 70,
-          priority: "Medium",
-          evidence: ["Evidence point"],
-          status: "pending"
-        }
-      ],
-      artifact: {
-        type: "Battlecard",
-        competitor: "Company name",
-        title: "Artifact title",
-        summary: "Short summary",
-        bullets: ["Useful sales note"],
-        strengths: ["Competitor strength"],
-        weaknesses: ["Competitor weakness"],
-        objections: [
-          {
-            objection: "Buyer objection",
-            response: "Response",
-            evidence: [
-              {
-                source: "Workspace",
-                detail: "Evidence detail",
-                freshness: "Current"
-              }
-            ]
-          }
-        ],
-        talkTracks: ["Talk track"],
-        counterMoves: {
-          defensive: "Defensive move",
-          offensive: "Offensive move",
-          ignore: "Ignore condition"
-        },
-        approvalStatus: "pending"
-      },
-      activity: [
-        {
-          label: "What the agent did",
-          source: "Agent",
-          status: "Needs approval",
-          evidence: "What evidence supports the step"
-        }
-      ]
+export function createCounterOSAgent(workspaceId: string) {
+  const context = getWorkspaceAgentContext(workspaceId);
+  const pendingSuggestions = context.suggestedCompetitors.filter(
+    (suggestion) => suggestion.status === "pending"
+  );
+  const instructions = [
+    buildCounterOSAgentSystemPrompt({
+      productName: context.productProfile?.name,
+      productDescription: context.productProfile?.description,
+      icp: context.productProfile?.icp,
+      category: context.productProfile?.category,
+      geography: context.productProfile?.geography,
+      knownCompetitors: context.competitors.map((competitor) => competitor.name),
+      pendingSuggestions: pendingSuggestions.map(
+        (suggestion) => `${suggestion.name} (${suggestion.domain}, id: ${suggestion.id})`
+      )
     }),
-    "Rules:",
-    "- If the user asks to find competitors, return 2-5 suggestedCompetitors.",
-    "- If the user asks for a battlecard, target accounts, artifact, memo, or counter-move, return one artifact.",
-    "- Do not approve competitors. All suggested competitors must have status pending.",
-    "- Do not claim Crustdata/web/page fetching ran unless explicit data is present in the context."
+    "",
+    "You now run through Vercel AI SDK tool calls. Use tools to do real workspace work, then write a concise final response.",
+    "Tool-use rules:",
+    "- For approval and rejection, call approveSuggestion or rejectSuggestion only when the founder explicitly asks to approve, accept, reject, decline, or dismiss a pending suggestion.",
+    "- For provider discovery, call discoverCompetitors when the founder asks to find, discover, search, fetch, or look up competitors, rivals, or alternatives.",
+    "- For a named company that the founder explicitly asks to add or save, call saveCompetitorSuggestion instead of inventing a database write in prose.",
+    "- For battlecards, target-account requests, and positioning memos, draft the content and call saveArtifact only when the founder asks to create or save the artifact.",
+    "- For page monitoring, call trackPage when the founder asks to track, monitor, or watch a URL. Set snapshotNow when they ask to fetch, check, capture, or snapshot it now.",
+    "- For an already-tracked URL or tracked page id, call snapshotTrackedPage when the founder asks for a fresh snapshot or page check.",
+    "- If a target is ambiguous, ask one short clarifying question instead of taking action.",
+    "- Never claim a provider lookup, database write, approval, rejection, enrichment, or page fetch happened unless a tool result says it happened.",
+    "- Summarize tool results plainly in the final answer and mention any controlled provider failures without blaming the user.",
+    "- Keep the final answer founder-facing: what changed, what needs review, and the next useful step."
   ].join("\n");
 
-  try {
-    const outputText = await createOpenAITextResponse({
-      input: [
-        {
-          role: "system",
-          content: [{ type: "input_text", text: instruction }]
-        },
-        ...input.recentMessages.slice(-8).map((message) => ({
-          role: message.role === "agent" ? ("assistant" as const) : ("user" as const),
-          content: [{ type: "input_text" as const, text: message.text }]
-        })),
-        {
-          role: "user",
-          content: [{ type: "input_text", text: input.userText }]
-        }
-      ]
-    });
-    const parsed = agentChatOutputSchema.safeParse(parseJsonObject(outputText));
-
-    if (!parsed.success) {
-      throw new Error(parsed.error.issues[0]?.message ?? "Agent output did not match schema.");
-    }
-
-    return persistAgentOutput(input.workspaceId, parsed.data);
-  } catch (error) {
-    const message =
-      error instanceof OpenAIClientError
-        ? `OpenAI request failed: ${error.message}`
-        : `Agent output failed validation: ${error instanceof Error ? error.message : "unknown error"}`;
-
-    const activity = recordAgentActivity({
-      workspaceId: input.workspaceId,
-      label: "Generate agent response",
-      source: "Agent",
-      status: "Needs approval",
-      evidence: message
-    });
-
-    return {
-      reply: `${message}. I saved the message so you can retry after fixing the issue.`,
-      suggestedCompetitors: [],
-      artifact: null,
-      activities: [activity]
-    };
-  }
-}
-
-function persistAgentOutput(
-  workspaceId: string,
-  output: z.infer<typeof agentChatOutputSchema>
-): AgentChatResult {
-  const suggestedCompetitors = output.suggestedCompetitors.map((suggestion) =>
-    createSuggestedCompetitor({
-      workspaceId,
-      name: suggestion.name,
-      domain: normalizeDomain(suggestion.domain),
-      description: suggestion.description,
-      threatType: suggestion.threatType,
-      confidence: suggestion.confidence,
-      priority: suggestion.priority,
-      evidence: suggestion.evidence,
-      intelligenceStatus: "unresolved"
-    })
-  );
-
-  const artifact = output.artifact ? persistArtifact(workspaceId, output.artifact) : null;
-
-  const activities =
-    output.activity.length > 0
-      ? output.activity.map((activity) =>
-          recordAgentActivity({
-            workspaceId,
-            label: activity.label,
-            source: activity.source,
-            status: activity.status,
-            evidence: activity.evidence
-          })
-        )
-      : [
-          recordAgentActivity({
-            workspaceId,
-            label: "Generate agent response",
-            source: "OpenAI",
-            status: "Done",
-            evidence: "Agent returned a structured response."
-          })
-        ];
-
-  return {
-    reply: output.reply,
-    suggestedCompetitors,
-    artifact,
-    activities
-  };
-}
-
-function persistArtifact(
-  workspaceId: string,
-  artifact: z.infer<typeof battlecardArtifactSchema> | z.infer<typeof targetAccountRequestSchema>
-) {
-  if (artifact.type === "Battlecard") {
-    return createArtifact({
-      workspaceId,
-      type: "Battlecard",
-      title: artifact.title,
-      summary: artifact.summary,
-      bullets: [
-        ...artifact.bullets,
-        ...artifact.strengths.map((item) => `Strength: ${item}`),
-        ...artifact.weaknesses.map((item) => `Weakness: ${item}`),
-        ...artifact.talkTracks.map((item) => `Talk track: ${item}`)
-      ].slice(0, 12)
-    });
-  }
-
-  return createArtifact({
-    workspaceId,
-    type: "Target accounts",
-    title: artifact.title,
-    summary: `${artifact.icp} in ${artifact.geography}. ${artifact.competitorContext}`,
-    bullets: [
-      `Category: ${artifact.category}`,
-      ...artifact.buyingTriggers.map((item) => `Trigger: ${item}`),
-      ...artifact.exclusions.map((item) => `Exclude: ${item}`)
-    ].slice(0, 12)
+  return new ToolLoopAgent({
+    id: "counteros-workspace-agent",
+    model: openai(process.env.COUNTEROS_OPENAI_MODEL ?? "gpt-5.4-mini"),
+    instructions,
+    tools: createCounterOSTools(workspaceId),
+    stopWhen: stepCountIs(8),
+    maxOutputTokens: 2200
   });
 }
 
-function parseJsonObject(value: string) {
-  const trimmed = value.trim();
+export type CounterOSAgentUIMessage = InferAgentUIMessage<
+  ReturnType<typeof createCounterOSAgent>
+>;
 
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-
-    if (start >= 0 && end > start) {
-      return JSON.parse(trimmed.slice(start, end + 1));
-    }
-
-    throw new Error("Agent did not return JSON.");
-  }
+export function extractTextFromUIMessage(message: {
+  parts: Array<{ type: string; text?: string }>;
+}) {
+  return message.parts
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text ?? "")
+    .join("")
+    .trim();
 }

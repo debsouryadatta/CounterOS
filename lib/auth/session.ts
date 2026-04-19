@@ -1,4 +1,5 @@
 import { getServerSession } from "next-auth";
+import { findUserById } from "@/lib/db/queries";
 import { authOptions } from "./options";
 
 export async function getCurrentUser() {
@@ -8,9 +9,15 @@ export async function getCurrentUser() {
     return null;
   }
 
+  const user = findUserById(session.user.id);
+
+  if (!user) {
+    return null;
+  }
+
   return {
-    id: session.user.id,
-    email: session.user.email,
-    name: session.user.name ?? null
+    id: user.id,
+    email: user.email,
+    name: user.name
   };
 }

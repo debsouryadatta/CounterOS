@@ -4,7 +4,7 @@
 
 The product name is **CounterOS**.
 
-Use this name consistently in the UI, docs, code comments, seed data, and demo copy. The product should feel like a focused agent for competitive counter-moves, not a broad market research dashboard.
+Use this name consistently in the UI, docs, code comments, and product copy. The product should feel like a focused agent for competitive counter-moves, not a broad market research dashboard.
 
 ## Product Idea
 

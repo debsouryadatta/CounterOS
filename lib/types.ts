@@ -129,10 +129,35 @@ export type AgentActivity = {
   evidence: string;
 };
 
+export type AgentStepKind = "thinking" | "fetching" | "performing" | "saving" | "responding";
+
+export type AgentRunStep = {
+  id: string;
+  kind: AgentStepKind;
+  label: string;
+  detail: string;
+  status: ActivityStatus;
+};
+
 export type ChatMessage = {
   id: string;
   role: "agent" | "user";
   text: string;
+  steps?: AgentRunStep[];
+};
+
+export type AgentToolOutput = {
+  ok: boolean;
+  summary: string;
+  code?: string;
+  suggestedCompetitors?: SuggestedCompetitor[];
+  suggestionUpdates?: SuggestedCompetitor[];
+  approvedCompetitors?: CompetitorProfile[];
+  artifact?: Artifact | null;
+  activities?: AgentActivity[];
+  trackedPages?: TrackedPage[];
+  snapshots?: PageSnapshot[];
+  signals?: Signal[];
 };
 
 export type DashboardData = {
@@ -140,7 +165,7 @@ export type DashboardData = {
     id: string;
     name: string;
   };
-  productProfile: ProductProfile;
+  productProfile: ProductProfile | null;
   suggestedCompetitors: SuggestedCompetitor[];
   approvedCompetitors: CompetitorProfile[];
   signals: Signal[];

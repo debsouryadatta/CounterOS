@@ -192,15 +192,10 @@ export async function discoverCompanies(input: {
     {
       fields: COMPANY_DISCOVERY_FIELDS,
       filters: {
-        op: "or",
+        op: "and",
         conditions: [
           {
             field: "basic_info.name",
-            type: "contains",
-            value: input.query
-          },
-          {
-            field: "basic_info.description",
             type: "contains",
             value: input.query
           }

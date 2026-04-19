@@ -96,7 +96,7 @@ Acceptance criteria:
 
 - User can sign up/login with email and password.
 - User data survives page refreshes.
-- Mock workflow reads from SQLite seed data instead of static-only data.
+- New workspaces can start empty and later read API-sourced data from SQLite.
 
 ## Phase 3: Core Product CRUD APIs
 

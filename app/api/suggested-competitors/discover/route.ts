@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireWorkspace } from "@/lib/auth/workspace";
+import { CrustdataError } from "@/lib/crustdata/client";
 import { discoverCompanies, normalizeDomain } from "@/lib/crustdata/intelligence";
 import { createSuggestedCompetitor } from "@/lib/db/queries";
 
@@ -31,11 +32,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "CRUSTDATA_API_KEY is not configured." }, { status: 503 });
   }
 
-  const companies = await discoverCompanies({
-    query: parsed.data.query,
-    limit: parsed.data.limit,
-    workspaceId: auth.workspace.id
-  });
+  let companies;
+
+  try {
+    companies = await discoverCompanies({
+      query: parsed.data.query,
+      limit: parsed.data.limit,
+      workspaceId: auth.workspace.id
+    });
+  } catch (error) {
+    if (error instanceof CrustdataError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          provider: "crustdata",
+          endpoint: error.endpoint,
+          status: error.status,
+          responseBody: error.responseBody
+        },
+        { status: 502 }
+      );
+    }
+
+    throw error;
+  }
 
   const suggestions = companies
     .map((company) => {
