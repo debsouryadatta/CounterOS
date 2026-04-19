@@ -51,15 +51,22 @@ export async function POST(
   const updatedCompetitor = competitor ?? existing;
 
   if (enrichment.intelligenceStatus === "failed") {
-    return NextResponse.json(
-      {
-        competitor: updatedCompetitor,
-        error: enrichment.enrichmentError ?? "Crustdata enrichment failed."
-      },
-      {
-        status: enrichment.enrichmentError?.includes("CRUSTDATA_API_KEY") ? 503 : 502
-      }
-    );
+    const message = enrichment.enrichmentError ?? "Crustdata enrichment failed.";
+
+    if (message.includes("CRUSTDATA_API_KEY")) {
+      return NextResponse.json(
+        {
+          competitor: updatedCompetitor,
+          error: message
+        },
+        { status: 503 }
+      );
+    }
+
+    return NextResponse.json({
+      competitor: updatedCompetitor,
+      warning: message
+    });
   }
 
   return NextResponse.json({ competitor: updatedCompetitor });

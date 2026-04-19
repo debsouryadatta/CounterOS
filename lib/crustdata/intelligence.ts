@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { CompetitorProfile, SuggestedCompetitor } from "@/lib/types";
+import { CrustdataError } from "./client";
 import { enrichCompany, identifyCompany, searchCompanies } from "./company";
 import type {
   CompanyIdentifierInput,
@@ -22,17 +23,10 @@ export const COMPANY_DISCOVERY_FIELDS = [
 ] as NonEmptyArray<string>;
 
 export const COMPANY_ENRICH_FIELDS = [
-  "crustdata_company_id",
-  "basic_info.name",
-  "basic_info.primary_domain",
-  "basic_info.website",
-  "basic_info.employee_count_range",
-  "headcount.total",
-  "funding.total_investment_usd",
-  "funding.last_round_type",
-  "locations.hq_country",
-  "competitors.websites",
-  "news"
+  "basic_info",
+  "headcount",
+  "funding",
+  "hiring"
 ] as NonEmptyArray<string>;
 
 export type CompanyIdentityResult = Pick<
@@ -144,6 +138,7 @@ export async function enrichCompetitorCompany(input: {
         fields: COMPANY_ENRICH_FIELDS
       },
       {
+        maxRetries: 0,
         cache: {
           workspaceId: input.workspaceId,
           ttlMs: 24 * 60 * 60 * 1000
@@ -326,5 +321,9 @@ function getNestedValue(object: unknown, path: string[]) {
 }
 
 function getErrorMessage(error: unknown) {
+  if (error instanceof CrustdataError && error.status && error.status >= 500) {
+    return "Crustdata is temporarily unavailable. Try enrichment again in a moment.";
+  }
+
   return error instanceof Error ? error.message : "Unknown Crustdata error";
 }

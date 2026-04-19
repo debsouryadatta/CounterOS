@@ -814,6 +814,7 @@ export function CounterOSDashboard({
       const payload = (await response.json().catch(() => ({}))) as {
         competitor?: CompetitorProfile;
         error?: string;
+        warning?: string;
       };
 
       if (payload.competitor) {
@@ -830,6 +831,18 @@ export function CounterOSDashboard({
           title: "Enrichment failed",
           description:
             payload.error ?? "Crustdata enrichment failed. The row was updated with the error."
+        });
+        return;
+      }
+
+      if (payload.competitor?.intelligenceStatus === "failed") {
+        notify({
+          tone: "warning",
+          title: "Provider unavailable",
+          description:
+            payload.warning ??
+            payload.competitor.enrichmentError ??
+            "Crustdata could not enrich this company right now."
         });
         return;
       }
@@ -1947,7 +1960,7 @@ function CompetitorsView({
             />
           ) : (
             <div className="overflow-hidden rounded-xl border">
-              <div className="grid grid-cols-[minmax(220px,1.15fr)_minmax(160px,0.8fr)_minmax(180px,0.85fr)_auto] gap-4 bg-muted/70 px-4 py-3 text-xs font-semibold uppercase text-muted-foreground max-[980px]:hidden">
+              <div className="grid grid-cols-[minmax(250px,1fr)_minmax(160px,0.45fr)_minmax(360px,1.05fr)_140px] gap-4 bg-muted/70 px-4 py-3 text-xs font-semibold uppercase text-muted-foreground max-[1180px]:hidden">
                 <span>Company</span>
                 <span>Threat</span>
                 <span>Coverage</span>
@@ -2872,7 +2885,7 @@ function CompetitorRow({
   onConfirmRemove: () => void;
 }) {
   return (
-    <article className="grid grid-cols-[minmax(220px,1.15fr)_minmax(160px,0.8fr)_minmax(180px,0.85fr)_auto] items-center gap-4 bg-background px-4 py-4 max-[980px]:grid-cols-1">
+    <article className="grid grid-cols-[minmax(250px,1fr)_minmax(160px,0.45fr)_minmax(360px,1.05fr)_140px] items-center gap-4 bg-background px-4 py-4 max-[1180px]:grid-cols-1">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="m-0 truncate text-base font-semibold">{competitor.name}</h3>
@@ -2892,13 +2905,13 @@ function CompetitorRow({
         />
       </div>
 
-      <dl className="grid grid-cols-3 gap-3 text-sm max-[520px]:grid-cols-1">
+      <dl className="grid min-w-0 grid-cols-3 gap-3 text-sm max-[760px]:grid-cols-1">
         <Fact label="Headcount" value={competitor.headcount} />
         <Fact label="Hiring" value={competitor.hiring} />
         <Fact label="Funding" value={competitor.funding} />
       </dl>
 
-      <div className="flex flex-wrap justify-end gap-2 max-[980px]:justify-start">
+      <div className="flex flex-wrap justify-end gap-2 max-[1180px]:justify-start">
         <Button
           variant="outline"
           type="button"
@@ -2921,7 +2934,7 @@ function CompetitorRow({
       </div>
 
       {competitor.enrichmentError && (
-        <p className="col-span-full m-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="col-span-full m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           {competitor.enrichmentError}
         </p>
       )}
@@ -3184,9 +3197,13 @@ function AnalysisBlock({ title, text }: { title: string; text: string }) {
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <dt className="text-xs font-medium uppercase text-muted-foreground">{label}</dt>
-      <dd className="m-0 mt-1 text-sm">{value}</dd>
+    <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
+      <dt className="truncate text-[11px] font-semibold uppercase text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="m-0 mt-1 line-clamp-2 break-words text-sm leading-5">
+        {value}
+      </dd>
     </div>
   );
 }
