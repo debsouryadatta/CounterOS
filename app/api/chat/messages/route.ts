@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireWorkspace } from "@/lib/auth/workspace";
+import { runCounterlessAgentChat } from "@/lib/ai/agent";
 import { appendChatTurn } from "@/lib/db/queries";
 
 export const runtime = "nodejs";
@@ -23,10 +24,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter a message first." }, { status: 400 });
   }
 
-  const messages = appendChatTurn({
+  const agentResult = await runCounterlessAgentChat({
     workspaceId: auth.workspace.id,
-    userText: parsed.data.text
+    userText: parsed.data.text,
+    recentMessages: []
   });
 
-  return NextResponse.json({ messages });
+  const messages = appendChatTurn({
+    workspaceId: auth.workspace.id,
+    userText: parsed.data.text,
+    agentText: agentResult.reply
+  });
+
+  return NextResponse.json({
+    messages,
+    suggestedCompetitors: agentResult.suggestedCompetitors,
+    artifact: agentResult.artifact,
+    activities: agentResult.activities
+  });
 }

@@ -3,7 +3,8 @@ import "server-only";
 import type {
   CompanySearchResponse,
   CrustdataCompanyData,
-  CrustdataCompanyMatchEnvelope
+  CrustdataCompanyMatchEnvelope,
+  GenericSearchResponse
 } from "./types";
 
 export function normalizeResultsArray<T>(payload: unknown, extraArrayKeys: string[] = []): T[] {
@@ -36,6 +37,21 @@ export function normalizeCompanySearchResponse<TCompany = CrustdataCompanyData>(
 
   return {
     companies,
+    next_cursor: readOptionalString(envelope.next_cursor ?? envelope.nextCursor),
+    total_count: readOptionalNumber(envelope.total_count ?? envelope.totalCount),
+    raw: payload
+  };
+}
+
+export function normalizeResultsEnvelope<TItem>(
+  payload: unknown,
+  extraArrayKeys: string[] = []
+): GenericSearchResponse<TItem> {
+  const results = normalizeResultsArray<TItem>(payload, extraArrayKeys);
+  const envelope = isRecord(payload) ? payload : {};
+
+  return {
+    results,
     next_cursor: readOptionalString(envelope.next_cursor ?? envelope.nextCursor),
     total_count: readOptionalNumber(envelope.total_count ?? envelope.totalCount),
     raw: payload

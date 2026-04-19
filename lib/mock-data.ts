@@ -31,7 +31,8 @@ export const suggestedCompetitors: SuggestedCompetitor[] = [
       "Messaging overlaps on missed calls and appointment booking.",
       "Recent hiring hints at healthcare sales expansion."
     ],
-    status: "pending"
+    status: "pending",
+    intelligenceStatus: "unresolved"
   },
   {
     id: "suggestion-2",
@@ -47,7 +48,8 @@ export const suggestedCompetitors: SuggestedCompetitor[] = [
       "Promotes enterprise onboarding and compliance controls.",
       "Likely to move downmarket if growth slows."
     ],
-    status: "pending"
+    status: "pending",
+    intelligenceStatus: "unresolved"
   },
   {
     id: "suggestion-3",
@@ -63,7 +65,8 @@ export const suggestedCompetitors: SuggestedCompetitor[] = [
       "Appears in search results for clinic answering services.",
       "Useful for objection handling in sales battlecards."
     ],
-    status: "pending"
+    status: "pending",
+    intelligenceStatus: "unresolved"
   }
 ];
 
@@ -78,7 +81,8 @@ export const approvedCompetitors: CompetitorProfile[] = [
     headcount: "82 employees",
     hiring: "Adding enterprise AEs and implementation specialists",
     funding: "Series A, estimated $18M raised",
-    confidence: 88
+    confidence: 88,
+    intelligenceStatus: "unresolved"
   },
   {
     id: "competitor-2",
@@ -90,7 +94,8 @@ export const approvedCompetitors: CompetitorProfile[] = [
     headcount: "240 employees",
     hiring: "Hiring product marketers and partnership roles",
     funding: "Growth stage, estimated $55M raised",
-    confidence: 81
+    confidence: 81,
+    intelligenceStatus: "unresolved"
   }
 ];
 

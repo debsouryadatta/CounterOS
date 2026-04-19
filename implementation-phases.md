@@ -110,13 +110,13 @@ Deliverables:
   - product/company profile create/update: completed
   - manual competitor create/update: completed
   - suggested competitor create/update: completed
-  - approve/reject/edit/verify suggestions: approve/reject/edit completed; verify pending
+  - approve/reject/edit/verify suggestions: completed
   - signal list/detail: completed
   - artifact list/detail: completed
   - chat message persistence: completed for the mock agent response loop
 - Zod validation for request bodies.
 - Basic server-side permission checks by workspace.
-- Decision log records for approve/reject/ignore/snooze actions: approve/reject completed; ignore/snooze pending.
+- Decision log records for approve/reject/ignore/snooze actions: completed.
 
 Acceptance criteria:
 
@@ -138,9 +138,9 @@ Deliverables:
   - `x-api-version: 2025-11-01`
 - Central timeout, retry, and rate-limit handling.
 - API cache table usage for successful responses.
-- Company Identify integration for free entity resolution: server wrapper completed, route wiring pending.
-- Company Search integration for competitor suggestions and target-account discovery: server wrapper completed, route wiring pending.
-- Company Enrich integration for approved competitors only: server wrapper completed, route wiring pending.
+- Company Identify integration for free entity resolution: completed.
+- Company Search integration for competitor suggestions and target-account discovery: completed.
+- Company Enrich integration for approved competitors only: completed.
 - UI states for:
   - unresolved
   - resolved
@@ -164,7 +164,7 @@ Acceptance criteria:
 
 ## Phase 5: AI Agent, Structured Outputs, And Tool Calls
 
-Status: in progress
+Status: mostly completed
 
 Goal: make Agent Chat a real control surface for the core Counterless workflow.
 
@@ -201,16 +201,16 @@ Goal: add real strategic signals beyond static company enrichment.
 
 Deliverables:
 
-- Jobs Search integration for competitor hiring signals.
-- Person Search integration for leaders and role movements.
-- Person Enrich integration for selected people only.
+- Jobs Search integration for competitor hiring signals: completed.
+- Person Search integration for leaders and role movements: wrapper completed; signal persistence pending.
+- Person Enrich integration for selected people only: wrapper completed; signal persistence pending.
 - Signal generation rules for:
   - hiring spikes: foundation completed
   - new GTM or leadership roles: foundation completed
   - product/engineering hiring focus: foundation completed
   - new geography hiring: foundation completed
   - people movement tied to competitor strategy: foundation completed
-- Signal scoring implementation: deterministic foundation completed; provider-backed generation pending.
+- Signal scoring implementation: completed for job and page-change signals; people-movement signal generation pending.
 
 Implementation guidance:
 
@@ -225,17 +225,17 @@ Acceptance criteria:
 
 ## Phase 7: Web Context And Page Signals
 
-Status: pending
+Status: in progress
 
 Goal: detect public web changes and add source evidence.
 
 Deliverables:
 
 - Web search/page fetch strategy.
-- Homepage/pricing page/manual URL tracking.
+- Homepage/pricing page/manual URL tracking: API completed; dashboard surface pending.
 - Evidence source storage for page fetches.
-- Basic diffing or snapshot comparison for selected pages.
-- AI interpretation of page changes.
+- Basic diffing or snapshot comparison for selected pages: completed.
+- AI interpretation of page changes: pending.
 
 Implementation guidance:
 
@@ -255,7 +255,7 @@ Goal: make discovery, enrichment, and monitoring durable.
 
 Deliverables:
 
-- Redis and BullMQ.
+- Redis and BullMQ: dependency and queue wiring completed.
 - Jobs for:
   - competitor discovery: payload contract completed; worker pending
   - company enrichment: payload contract completed; worker pending
@@ -264,7 +264,7 @@ Deliverables:
   - page snapshot collection: payload contract completed; worker pending
   - signal scoring: payload contract completed; worker pending
   - weekly founder briefing: payload contract completed; worker pending
-- Bounded queues and backoff.
+- Bounded queues and backoff: completed for initial worker wiring.
 - Observability for:
   - API calls
   - token usage

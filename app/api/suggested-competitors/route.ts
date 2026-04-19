@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireWorkspace } from "@/lib/auth/workspace";
+import { resolveCompanyIdentity } from "@/lib/crustdata/intelligence";
 import {
   createSuggestedCompetitor,
   listSuggestedCompetitors
@@ -37,9 +38,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter a competitor name or domain." }, { status: 400 });
   }
 
-  const cleanDomain = normalizeDomain(parsed.data.value);
+  const identity = await resolveCompanyIdentity({
+    value: parsed.data.value,
+    workspaceId: auth.workspace.id
+  });
+  const cleanDomain = identity.matchedDomain
+    ? normalizeDomain(identity.matchedDomain)
+    : normalizeDomain(parsed.data.value);
 
-  const name = cleanDomain
+  const name = (identity.matchedName || cleanDomain)
     .split(".")[0]
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -48,7 +55,16 @@ export async function POST(request: Request) {
     workspaceId: auth.workspace.id,
     name,
     domain: cleanDomain,
-    description: "Manually added competitor waiting for Identify and enrichment."
+    description:
+      identity.intelligenceStatus === "resolved"
+        ? "Resolved by Crustdata Identify and waiting for founder approval."
+        : "Manually added competitor waiting for Identify and enrichment.",
+    evidence: identity.evidence,
+    intelligenceStatus: identity.intelligenceStatus,
+    crustdataCompanyId: identity.crustdataCompanyId,
+    crustdataMatchConfidence: identity.crustdataMatchConfidence,
+    identifyError: identity.identifyError,
+    identifiedAt: identity.identifiedAt
   });
 
   return NextResponse.json({ suggestion });

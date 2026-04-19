@@ -70,6 +70,11 @@ export const suggestedCompetitors = sqliteTable(
     priority: text("priority").notNull(),
     evidenceJson: text("evidence_json").notNull(),
     status: text("status").notNull().default("pending"),
+    intelligenceStatus: text("intelligence_status").notNull().default("unresolved"),
+    crustdataCompanyId: text("crustdata_company_id"),
+    crustdataMatchConfidence: integer("crustdata_match_confidence"),
+    identifyError: text("identify_error"),
+    identifiedAt: text("identified_at"),
     ...timestamps
   },
   (table) => ({
@@ -77,6 +82,9 @@ export const suggestedCompetitors = sqliteTable(
     domainWorkspaceIdx: index("suggested_competitors_domain_workspace_idx").on(
       table.domain,
       table.workspaceId
+    ),
+    crustdataCompanyIdx: index("suggested_competitors_crustdata_company_idx").on(
+      table.crustdataCompanyId
     )
   })
 );
@@ -101,10 +109,19 @@ export const competitors = sqliteTable(
     hiring: text("hiring").notNull(),
     funding: text("funding").notNull(),
     confidence: integer("confidence").notNull(),
+    intelligenceStatus: text("intelligence_status").notNull().default("unresolved"),
+    crustdataCompanyId: text("crustdata_company_id"),
+    crustdataMatchConfidence: integer("crustdata_match_confidence"),
+    crustdataProfileJson: text("crustdata_profile_json"),
+    enrichmentError: text("enrichment_error"),
+    enrichedAt: text("enriched_at"),
     ...timestamps
   },
   (table) => ({
     workspaceIdx: index("competitors_workspace_idx").on(table.workspaceId),
+    crustdataCompanyIdx: index("competitors_crustdata_company_idx").on(
+      table.crustdataCompanyId
+    ),
     uniqueDomainPerWorkspace: uniqueIndex("competitors_domain_workspace_idx").on(
       table.domain,
       table.workspaceId
@@ -263,7 +280,61 @@ export const apiCacheEntries = sqliteTable(
   })
 );
 
+export const trackedPages = sqliteTable(
+  "tracked_pages",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    competitorId: text("competitor_id").references(() => competitors.id, {
+      onDelete: "set null"
+    }),
+    url: text("url").notNull(),
+    pageType: text("page_type").notNull().default("other"),
+    status: text("status").notNull().default("active"),
+    lastSnapshotAt: text("last_snapshot_at"),
+    lastError: text("last_error"),
+    ...timestamps
+  },
+  (table) => ({
+    workspaceIdx: index("tracked_pages_workspace_idx").on(table.workspaceId),
+    competitorIdx: index("tracked_pages_competitor_idx").on(table.competitorId),
+    uniquePagePerWorkspace: uniqueIndex("tracked_pages_url_workspace_idx").on(
+      table.url,
+      table.workspaceId
+    )
+  })
+);
+
+export const pageSnapshots = sqliteTable(
+  "page_snapshots",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    trackedPageId: text("tracked_page_id")
+      .notNull()
+      .references(() => trackedPages.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    title: text("title"),
+    extractedText: text("extracted_text").notNull(),
+    textHash: text("text_hash").notNull(),
+    diffSummary: text("diff_summary"),
+    fetchedAt: text("fetched_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
+  },
+  (table) => ({
+    workspaceIdx: index("page_snapshots_workspace_idx").on(table.workspaceId),
+    trackedPageIdx: index("page_snapshots_tracked_page_idx").on(table.trackedPageId),
+    hashIdx: index("page_snapshots_text_hash_idx").on(table.textHash)
+  })
+);
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type SuggestedCompetitorRow = typeof suggestedCompetitors.$inferSelect;
 export type CompetitorRow = typeof competitors.$inferSelect;
+export type TrackedPageRow = typeof trackedPages.$inferSelect;
+export type PageSnapshotRow = typeof pageSnapshots.$inferSelect;

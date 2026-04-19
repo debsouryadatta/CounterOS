@@ -125,3 +125,47 @@ export type CompanySearchResponse<TCompany = CrustdataCompanyData> = {
   total_count: number | null;
   raw: unknown;
 };
+
+export type GenericSearchRequest = {
+  fields: NonEmptyArray<string>;
+  filters?: CrustdataFilterGroup;
+  sorts?: CompanySearchSort[];
+  limit?: number;
+  cursor?: string;
+};
+
+export type CrustdataJobData = {
+  title?: string;
+  company_name?: string;
+  company_domain?: string;
+  location?: string;
+  date_posted?: string;
+  [key: string]: unknown;
+};
+
+export type CrustdataPersonData = {
+  name?: string;
+  professional_network_url?: string;
+  current_title?: string;
+  current_company_name?: string;
+  [key: string]: unknown;
+};
+
+export type GenericSearchResponse<TItem> = {
+  results: TItem[];
+  next_cursor: string | null;
+  total_count: number | null;
+  raw: unknown;
+};
+
+export type PersonEnrichRequest =
+  | {
+      professional_network_profile_urls: NonEmptyArray<string>;
+      business_emails?: never;
+      fields: NonEmptyArray<string>;
+    }
+  | {
+      professional_network_profile_urls?: never;
+      business_emails: NonEmptyArray<string>;
+      fields: NonEmptyArray<string>;
+    };

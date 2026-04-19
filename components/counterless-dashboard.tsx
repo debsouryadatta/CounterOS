@@ -42,6 +42,8 @@ export function CounterlessDashboard({
   );
   const [manualCompetitor, setManualCompetitor] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(initialData.messages);
+  const [artifacts, setArtifacts] = useState<Artifact[]>(initialData.artifacts);
+  const [activities, setActivities] = useState<AgentActivity[]>(initialData.agentActivities);
   const [chatInput, setChatInput] = useState("");
   const [notice, setNotice] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -49,8 +51,8 @@ export function CounterlessDashboard({
   const pendingSuggestions = suggestions.filter(
     (suggestion) => suggestion.status === "pending"
   );
-  const rejectedSuggestions = suggestions.filter(
-    (suggestion) => suggestion.status === "rejected"
+  const rejectedSuggestions = suggestions.filter((suggestion) =>
+    ["rejected", "ignored", "snoozed", "verified"].includes(suggestion.status)
   );
   const selectedSignal = useMemo(
     () =>
@@ -74,7 +76,10 @@ export function CounterlessDashboard({
     await decideSuggestion(id, "rejected");
   }
 
-  async function decideSuggestion(id: string, decision: "approved" | "rejected") {
+  async function decideSuggestion(
+    id: string,
+    decision: "approved" | "rejected" | "verified" | "ignored" | "snoozed"
+  ) {
     setNotice("");
     setIsBusy(true);
 
@@ -115,8 +120,8 @@ export function CounterlessDashboard({
 
       setNotice(
         decision === "approved"
-          ? "Approved and saved to SQLite."
-          : "Rejected and saved to the decision log."
+          ? "Approved, saved, and enrichment was attempted server-side."
+          : "Decision saved to the decision log."
       );
     } finally {
       setIsBusy(false);
@@ -193,12 +198,50 @@ export function CounterlessDashboard({
 
     const payload = (await response.json()) as {
       messages: ChatMessage[];
+      suggestedCompetitors?: SuggestedCompetitor[];
+      artifact?: Artifact | null;
+      activities?: AgentActivity[];
     };
 
     setMessages((current) => [
       ...current.filter((message) => message.id !== optimisticMessage.id),
       ...payload.messages
     ]);
+    if (payload.suggestedCompetitors?.length) {
+      setSuggestions((current) => [...payload.suggestedCompetitors!, ...current]);
+    }
+    if (payload.artifact) {
+      setArtifacts((current) => [payload.artifact!, ...current]);
+    }
+    if (payload.activities?.length) {
+      setActivities((current) => [...current, ...payload.activities!]);
+    }
+  }
+
+  async function enrichCompetitor(id: string) {
+    setNotice("");
+    setIsBusy(true);
+
+    try {
+      const response = await fetch(`/api/competitors/${id}/enrich`, {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        setNotice("Could not enrich that competitor. Please try again.");
+        return;
+      }
+
+      const payload = (await response.json()) as { competitor: CompetitorProfile };
+      setCompetitors((current) =>
+        current.map((competitor) =>
+          competitor.id === payload.competitor.id ? payload.competitor : competitor
+        )
+      );
+      setNotice("Crustdata enrichment finished.");
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   if (!selectedSignal) {
@@ -220,7 +263,8 @@ export function CounterlessDashboard({
 
         <div className="topbar-actions" aria-label="Workspace status">
           <StatusPill tone="green" label="SQLite active" />
-          <StatusPill tone="amber" label="Crustdata queued" />
+          <StatusPill tone="blue" label="Crustdata server-side" />
+          <StatusPill tone="blue" label="OpenAI chat wired" />
           <button
             className="secondary-button compact-button"
             type="button"
@@ -276,7 +320,7 @@ export function CounterlessDashboard({
               averageImpact={averageImpact}
               selectedSignal={selectedSignal}
               setActiveView={setActiveView}
-              activities={initialData.agentActivities}
+              activities={activities}
             />
           )}
 
@@ -291,6 +335,8 @@ export function CounterlessDashboard({
               addManualCompetitor={addManualCompetitor}
               approveSuggestion={approveSuggestion}
               rejectSuggestion={rejectSuggestion}
+              decideSuggestion={decideSuggestion}
+              enrichCompetitor={enrichCompetitor}
             />
           )}
 
@@ -304,14 +350,14 @@ export function CounterlessDashboard({
           )}
 
           {activeView === "moves" && (
-            <MovesView selectedSignal={selectedSignal} artifacts={initialData.artifacts} />
+            <MovesView selectedSignal={selectedSignal} artifacts={artifacts} />
           )}
 
           {activeView === "agent" && (
             <AgentView
               messages={messages}
               chatInput={chatInput}
-              activities={initialData.agentActivities}
+              activities={activities}
               setChatInput={setChatInput}
               sendMessage={sendMessage}
             />
@@ -404,7 +450,9 @@ function CompetitorsView({
   setManualCompetitor,
   addManualCompetitor,
   approveSuggestion,
-  rejectSuggestion
+  rejectSuggestion,
+  decideSuggestion,
+  enrichCompetitor
 }: {
   competitors: CompetitorProfile[];
   pendingSuggestions: SuggestedCompetitor[];
@@ -415,6 +463,11 @@ function CompetitorsView({
   addManualCompetitor: (event: FormEvent<HTMLFormElement>) => void;
   approveSuggestion: (suggestion: SuggestedCompetitor) => Promise<void>;
   rejectSuggestion: (id: string) => Promise<void>;
+  decideSuggestion: (
+    id: string,
+    decision: "approved" | "rejected" | "verified" | "ignored" | "snoozed"
+  ) => Promise<void>;
+  enrichCompetitor: (id: string) => Promise<void>;
 }) {
   return (
     <section className="view-stack" aria-labelledby="competitors-title">
@@ -450,6 +503,9 @@ function CompetitorsView({
               suggestion={suggestion}
               onApprove={() => approveSuggestion(suggestion)}
               onReject={() => rejectSuggestion(suggestion.id)}
+              onVerify={() => decideSuggestion(suggestion.id, "verified")}
+              onIgnore={() => decideSuggestion(suggestion.id, "ignored")}
+              onSnooze={() => decideSuggestion(suggestion.id, "snoozed")}
             />
           ))}
           {pendingSuggestions.length === 0 && (
@@ -465,7 +521,11 @@ function CompetitorsView({
         <PanelHeader kicker="Tracking" title={`${competitors.length} approved competitors`} />
         <div className="competitor-grid">
           {competitors.map((competitor) => (
-            <CompetitorCard key={competitor.id} competitor={competitor} />
+            <CompetitorCard
+              key={competitor.id}
+              competitor={competitor}
+              onEnrich={() => enrichCompetitor(competitor.id)}
+            />
           ))}
         </div>
       </section>
@@ -703,11 +763,17 @@ function PanelHeader({
 function SuggestionCard({
   suggestion,
   onApprove,
-  onReject
+  onReject,
+  onVerify,
+  onIgnore,
+  onSnooze
 }: {
   suggestion: SuggestedCompetitor;
   onApprove: () => void;
   onReject: () => void;
+  onVerify: () => void;
+  onIgnore: () => void;
+  onSnooze: () => void;
 }) {
   return (
     <article className="suggestion-card">
@@ -722,7 +788,12 @@ function SuggestionCard({
       <div className="tag-row">
         <StatusPill tone={toneForThreat(suggestion.threatType)} label={suggestion.threatType} />
         <StatusPill tone="amber" label={`${suggestion.priority} priority`} />
+        <StatusPill
+          tone={toneForIntelligence(suggestion.intelligenceStatus)}
+          label={formatIntelligenceStatus(suggestion.intelligenceStatus)}
+        />
       </div>
+      {suggestion.identifyError && <p className="inline-error">{suggestion.identifyError}</p>}
       <ul className="evidence-points">
         {suggestion.evidence.map((point) => (
           <li key={point}>{point}</li>
@@ -737,12 +808,30 @@ function SuggestionCard({
           <Icon name="x" />
           <span>Reject</span>
         </button>
+        <button className="secondary-button" type="button" onClick={onVerify}>
+          <Icon name="doc" />
+          <span>Verify</span>
+        </button>
+        <button className="secondary-button" type="button" onClick={onSnooze}>
+          <Icon name="pause" />
+          <span>Snooze</span>
+        </button>
+        <button className="secondary-button" type="button" onClick={onIgnore}>
+          <Icon name="x" />
+          <span>Ignore</span>
+        </button>
       </div>
     </article>
   );
 }
 
-function CompetitorCard({ competitor }: { competitor: CompetitorProfile }) {
+function CompetitorCard({
+  competitor,
+  onEnrich
+}: {
+  competitor: CompetitorProfile;
+  onEnrich: () => void;
+}) {
   return (
     <article className="competitor-card">
       <div className="card-title-row">
@@ -751,6 +840,15 @@ function CompetitorCard({ competitor }: { competitor: CompetitorProfile }) {
           <p>{competitor.domain}</p>
         </div>
         <StatusPill tone={toneForThreat(competitor.threatType)} label={competitor.threatType} />
+      </div>
+      <div className="tag-row">
+        <StatusPill
+          tone={toneForIntelligence(competitor.intelligenceStatus)}
+          label={formatIntelligenceStatus(competitor.intelligenceStatus)}
+        />
+        {competitor.crustdataCompanyId && (
+          <StatusPill tone="blue" label="Crustdata linked" />
+        )}
       </div>
       <p>{competitor.positioning}</p>
       <dl className="profile-facts">
@@ -767,6 +865,11 @@ function CompetitorCard({ competitor }: { competitor: CompetitorProfile }) {
           <dd>{competitor.funding}</dd>
         </div>
       </dl>
+      {competitor.enrichmentError && <p className="inline-error">{competitor.enrichmentError}</p>}
+      <button className="secondary-button" type="button" onClick={onEnrich}>
+        <Icon name="pulse" />
+        <span>Enrich</span>
+      </button>
     </article>
   );
 }
@@ -893,6 +996,20 @@ function toneForActivity(status: ActivityStatus): "green" | "amber" | "red" | "b
   if (status === "Running") return "blue";
   if (status === "Needs approval") return "amber";
   return "neutral";
+}
+
+function toneForIntelligence(
+  status: SuggestedCompetitor["intelligenceStatus"]
+): "green" | "amber" | "red" | "blue" | "neutral" {
+  if (status === "enriched" || status === "resolved") return "green";
+  if (status === "resolving" || status === "enriching") return "blue";
+  if (status === "failed") return "red";
+  if (status === "no_match") return "amber";
+  return "neutral";
+}
+
+function formatIntelligenceStatus(status: SuggestedCompetitor["intelligenceStatus"]) {
+  return status.replace(/_/g, " ");
 }
 
 function statusClass(status: ActivityStatus) {

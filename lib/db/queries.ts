@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
 import type {
   AgentActivity,
@@ -6,9 +6,11 @@ import type {
   CompetitorProfile,
   DashboardData,
   Evidence,
+  PageSnapshot,
   ProductProfile,
   Signal,
-  SuggestedCompetitor
+  SuggestedCompetitor,
+  TrackedPage
 } from "@/lib/types";
 import { db } from "./index";
 import {
@@ -19,9 +21,11 @@ import {
   competitors,
   evidenceSources,
   messages,
+  pageSnapshots,
   productProfiles,
   signals,
   suggestedCompetitors,
+  trackedPages,
   users,
   workspaces
 } from "./schema";
@@ -163,6 +167,7 @@ export function getDashboardData(userId: string): DashboardData {
     approvedCompetitors: competitorRows.map(mapCompetitor),
     signals: signalData,
     artifacts: artifactRows.map(mapArtifact),
+    trackedPages: listTrackedPages(workspace.id),
     agentActivities: activityRows.map((activity): AgentActivity => ({
       id: activity.id,
       label: activity.label,
@@ -265,14 +270,39 @@ export function getCompetitorByDomain(
 
 export function createCompetitor(input: {
   workspaceId: string;
-  competitor: Omit<CompetitorProfile, "id">;
+  competitor: Omit<
+    CompetitorProfile,
+    | "id"
+    | "intelligenceStatus"
+    | "crustdataCompanyId"
+    | "crustdataMatchConfidence"
+    | "crustdataProfile"
+    | "enrichmentError"
+    | "enrichedAt"
+  > &
+    Partial<
+      Pick<
+        CompetitorProfile,
+        | "intelligenceStatus"
+        | "crustdataCompanyId"
+        | "crustdataMatchConfidence"
+        | "crustdataProfile"
+        | "enrichmentError"
+        | "enrichedAt"
+      >
+    >;
 }): CompetitorProfile {
   const competitorId = randomUUID();
+  const { crustdataProfile, ...competitor } = input.competitor;
 
   db.insert(competitors).values({
     id: competitorId,
     workspaceId: input.workspaceId,
-    ...input.competitor
+    ...competitor,
+    crustdataProfileJson:
+      crustdataProfile === undefined
+        ? undefined
+        : JSON.stringify(crustdataProfile)
   }).run();
 
   const created = getCompetitor(input.workspaceId, competitorId);
@@ -295,9 +325,15 @@ export function updateCompetitor(input: {
     return null;
   }
 
+  const { crustdataProfile, ...updates } = input.updates;
+
   db.update(competitors)
     .set({
-      ...input.updates,
+      ...updates,
+      crustdataProfileJson:
+        crustdataProfile === undefined
+          ? undefined
+          : JSON.stringify(crustdataProfile),
       updatedAt: new Date().toISOString()
     })
     .where(
@@ -357,7 +393,18 @@ export function getSuggestedCompetitor(
 type SuggestedCompetitorPatch = Partial<
   Pick<
     SuggestedCompetitor,
-    "name" | "domain" | "description" | "threatType" | "confidence" | "priority"
+    | "name"
+    | "domain"
+    | "description"
+    | "threatType"
+    | "confidence"
+    | "priority"
+    | "status"
+    | "intelligenceStatus"
+    | "crustdataCompanyId"
+    | "crustdataMatchConfidence"
+    | "identifyError"
+    | "identifiedAt"
   >
 > & {
   evidence?: string[];
@@ -433,6 +480,58 @@ export function getSignal(workspaceId: string, signalId: string): Signal | null 
   return signal ? mapSignal(signal) : null;
 }
 
+export function createSignal(input: {
+  workspaceId: string;
+  competitor: string;
+  title: string;
+  summary: string;
+  impactScore: number;
+  priority: Signal["priority"];
+  detectedAt?: string;
+  evidence: Evidence[];
+  meaning: string;
+  recommendedMove: string;
+  counterMoves: Signal["counterMoves"];
+}): Signal {
+  const signalId = randomUUID();
+
+  db.transaction((tx) => {
+    tx.insert(signals).values({
+      id: signalId,
+      workspaceId: input.workspaceId,
+      competitor: input.competitor,
+      title: input.title,
+      summary: input.summary,
+      impactScore: input.impactScore,
+      priority: input.priority,
+      detectedAt: input.detectedAt ?? new Date().toISOString(),
+      meaning: input.meaning,
+      recommendedMove: input.recommendedMove,
+      counterMovesJson: JSON.stringify(input.counterMoves)
+    }).run();
+
+    for (const evidence of input.evidence) {
+      tx.insert(evidenceSources).values({
+        id: randomUUID(),
+        workspaceId: input.workspaceId,
+        signalId,
+        source: evidence.source,
+        detail: evidence.detail,
+        freshness: evidence.freshness,
+        url: evidence.url ?? null
+      }).run();
+    }
+  });
+
+  const created = getSignal(input.workspaceId, signalId);
+
+  if (!created) {
+    throw new Error("Failed to create signal");
+  }
+
+  return created;
+}
+
 export function listArtifacts(workspaceId: string): Artifact[] {
   return db
     .select()
@@ -454,11 +553,254 @@ export function getArtifact(workspaceId: string, artifactId: string): Artifact |
   return artifact ? mapArtifact(artifact) : null;
 }
 
+export function createArtifact(input: {
+  workspaceId: string;
+  type: Artifact["type"];
+  title: string;
+  summary: string;
+  bullets: string[];
+}): Artifact {
+  const artifactId = randomUUID();
+
+  db.insert(artifacts).values({
+    id: artifactId,
+    workspaceId: input.workspaceId,
+    type: input.type,
+    title: input.title,
+    summary: input.summary,
+    bulletsJson: JSON.stringify(input.bullets)
+  }).run();
+
+  const created = getArtifact(input.workspaceId, artifactId);
+
+  if (!created) {
+    throw new Error("Failed to create artifact");
+  }
+
+  return created;
+}
+
+export function recordAgentActivity(input: {
+  workspaceId: string;
+  label: string;
+  source: string;
+  status: AgentActivity["status"];
+  evidence: string;
+}): AgentActivity {
+  const activityId = randomUUID();
+
+  db.insert(agentActivities).values({
+    id: activityId,
+    workspaceId: input.workspaceId,
+    label: input.label,
+    source: input.source,
+    status: input.status,
+    evidence: input.evidence
+  }).run();
+
+  return {
+    id: activityId,
+    label: input.label,
+    source: input.source,
+    status: input.status,
+    evidence: input.evidence
+  };
+}
+
+export function getWorkspaceAgentContext(workspaceId: string) {
+  return {
+    productProfile: getProductProfile(workspaceId),
+    competitors: listCompetitors(workspaceId),
+    suggestedCompetitors: listSuggestedCompetitors(workspaceId),
+    signals: listSignals(workspaceId),
+    artifacts: listArtifacts(workspaceId)
+  };
+}
+
+export function listTrackedPages(workspaceId: string): TrackedPage[] {
+  return db
+    .select()
+    .from(trackedPages)
+    .where(eq(trackedPages.workspaceId, workspaceId))
+    .orderBy(desc(trackedPages.createdAt))
+    .all()
+    .map(mapTrackedPage);
+}
+
+export function getTrackedPage(workspaceId: string, trackedPageId: string): TrackedPage | null {
+  const trackedPage = db
+    .select()
+    .from(trackedPages)
+    .where(and(eq(trackedPages.id, trackedPageId), eq(trackedPages.workspaceId, workspaceId)))
+    .limit(1)
+    .get();
+
+  return trackedPage ? mapTrackedPage(trackedPage) : null;
+}
+
+export function getTrackedPageByUrl(workspaceId: string, url: string): TrackedPage | null {
+  const trackedPage = db
+    .select()
+    .from(trackedPages)
+    .where(and(eq(trackedPages.workspaceId, workspaceId), eq(trackedPages.url, url)))
+    .limit(1)
+    .get();
+
+  return trackedPage ? mapTrackedPage(trackedPage) : null;
+}
+
+export function createTrackedPage(input: {
+  workspaceId: string;
+  competitorId?: string | null;
+  url: string;
+  pageType: TrackedPage["pageType"];
+}): TrackedPage {
+  const trackedPageId = randomUUID();
+
+  db.insert(trackedPages).values({
+    id: trackedPageId,
+    workspaceId: input.workspaceId,
+    competitorId: input.competitorId ?? null,
+    url: input.url,
+    pageType: input.pageType,
+    status: "active"
+  }).run();
+
+  const created = getTrackedPage(input.workspaceId, trackedPageId);
+
+  if (!created) {
+    throw new Error("Failed to create tracked page");
+  }
+
+  return created;
+}
+
+export function listPageSnapshots(
+  workspaceId: string,
+  trackedPageId: string
+): PageSnapshot[] {
+  return db
+    .select()
+    .from(pageSnapshots)
+    .where(
+      and(
+        eq(pageSnapshots.workspaceId, workspaceId),
+        eq(pageSnapshots.trackedPageId, trackedPageId)
+      )
+    )
+    .orderBy(desc(pageSnapshots.fetchedAt))
+    .all()
+    .map(mapPageSnapshot);
+}
+
+export function getLatestPageSnapshot(
+  workspaceId: string,
+  trackedPageId: string
+): PageSnapshot | null {
+  const snapshot = db
+    .select()
+    .from(pageSnapshots)
+    .where(
+      and(
+        eq(pageSnapshots.workspaceId, workspaceId),
+        eq(pageSnapshots.trackedPageId, trackedPageId)
+      )
+    )
+    .orderBy(desc(pageSnapshots.fetchedAt))
+    .limit(1)
+    .get();
+
+  return snapshot ? mapPageSnapshot(snapshot) : null;
+}
+
+export function createPageSnapshot(input: {
+  workspaceId: string;
+  trackedPageId: string;
+  url: string;
+  title?: string | null;
+  extractedText: string;
+  diffSummary?: string | null;
+}): PageSnapshot {
+  const snapshotId = randomUUID();
+  const fetchedAt = new Date().toISOString();
+
+  db.transaction((tx) => {
+    tx.insert(pageSnapshots).values({
+      id: snapshotId,
+      workspaceId: input.workspaceId,
+      trackedPageId: input.trackedPageId,
+      url: input.url,
+      title: input.title ?? null,
+      extractedText: input.extractedText,
+      textHash: createHash("sha256").update(input.extractedText).digest("hex"),
+      diffSummary: input.diffSummary ?? null,
+      fetchedAt
+    }).run();
+
+    tx.update(trackedPages)
+      .set({
+        lastSnapshotAt: fetchedAt,
+        lastError: null,
+        status: "active",
+        updatedAt: fetchedAt
+      })
+      .where(
+        and(
+          eq(trackedPages.id, input.trackedPageId),
+          eq(trackedPages.workspaceId, input.workspaceId)
+        )
+      )
+      .run();
+  });
+
+  const created = db
+    .select()
+    .from(pageSnapshots)
+    .where(eq(pageSnapshots.id, snapshotId))
+    .limit(1)
+    .get();
+
+  if (!created) {
+    throw new Error("Failed to create page snapshot");
+  }
+
+  return mapPageSnapshot(created);
+}
+
+export function markTrackedPageFailed(input: {
+  workspaceId: string;
+  trackedPageId: string;
+  error: string;
+}) {
+  db.update(trackedPages)
+    .set({
+      status: "failed",
+      lastError: input.error,
+      updatedAt: new Date().toISOString()
+    })
+    .where(
+      and(
+        eq(trackedPages.id, input.trackedPageId),
+        eq(trackedPages.workspaceId, input.workspaceId)
+      )
+    )
+    .run();
+}
+
 export function createSuggestedCompetitor(input: {
   workspaceId: string;
   name: string;
   domain: string;
   description: string;
+  threatType?: SuggestedCompetitor["threatType"];
+  confidence?: number;
+  priority?: SuggestedCompetitor["priority"];
+  evidence?: string[];
+  intelligenceStatus?: SuggestedCompetitor["intelligenceStatus"];
+  crustdataCompanyId?: string | null;
+  crustdataMatchConfidence?: number | null;
+  identifyError?: string | null;
+  identifiedAt?: string | null;
 }) {
   const suggestion = {
     id: randomUUID(),
@@ -466,14 +808,21 @@ export function createSuggestedCompetitor(input: {
     name: input.name,
     domain: input.domain,
     description: input.description,
-    threatType: "Direct",
-    confidence: 65,
-    priority: "Medium",
-    evidenceJson: JSON.stringify([
-      "Added manually by the founder.",
-      "Will use Company Identify before paid enrichment in Phase 4."
-    ]),
-    status: "pending"
+    threatType: input.threatType ?? "Direct",
+    confidence: input.confidence ?? 65,
+    priority: input.priority ?? "Medium",
+    evidenceJson: JSON.stringify(
+      input.evidence ?? [
+        "Added manually by the founder.",
+        "Will use Company Identify before paid enrichment in Phase 4."
+      ]
+    ),
+    status: "pending",
+    intelligenceStatus: input.intelligenceStatus ?? "unresolved",
+    crustdataCompanyId: input.crustdataCompanyId ?? null,
+    crustdataMatchConfidence: input.crustdataMatchConfidence ?? null,
+    identifyError: input.identifyError ?? null,
+    identifiedAt: input.identifiedAt ?? null
   };
 
   db.insert(suggestedCompetitors).values(suggestion).run();
@@ -495,8 +844,12 @@ export function createSuggestedCompetitor(input: {
 export function decideSuggestedCompetitor(input: {
   workspaceId: string;
   suggestionId: string;
-  decision: "approved" | "rejected";
-}) {
+  decision: "approved" | "rejected" | "verified" | "ignored" | "snoozed";
+  reason?: string | null;
+}): {
+  suggestion: SuggestedCompetitor | null;
+  competitor: CompetitorProfile | null;
+} | null {
   const suggestion = db
     .select()
     .from(suggestedCompetitors)
@@ -528,7 +881,8 @@ export function decideSuggestedCompetitor(input: {
       id: randomUUID(),
       workspaceId: input.workspaceId,
       suggestionId: suggestion.id,
-      decision: input.decision
+      decision: input.decision,
+      reason: input.reason ?? null
     }).run();
 
     if (input.decision === "approved") {
@@ -558,7 +912,10 @@ export function decideSuggestedCompetitor(input: {
           headcount: "Pending Crustdata enrichment",
           hiring: "Queued for hiring signal check",
           funding: "Pending enrichment",
-          confidence: suggestion.confidence
+          confidence: suggestion.confidence,
+          intelligenceStatus: suggestion.intelligenceStatus,
+          crustdataCompanyId: suggestion.crustdataCompanyId,
+          crustdataMatchConfidence: suggestion.crustdataMatchConfidence
         }).run();
 
         const row = tx
@@ -589,6 +946,7 @@ export function decideSuggestedCompetitor(input: {
 export function appendChatTurn(input: {
   workspaceId: string;
   userText: string;
+  agentText?: string;
 }) {
   const chat =
     db
@@ -611,6 +969,7 @@ export function appendChatTurn(input: {
     chatId: chat.id,
     role: "agent",
     content:
+      input.agentText ??
       "I saved that message. The next agent phase will turn requests like this into structured tools, approvals, and artifacts."
   };
 
@@ -653,7 +1012,12 @@ function mapSuggestion(row: typeof suggestedCompetitors.$inferSelect): Suggested
     confidence: row.confidence,
     priority: row.priority as SuggestedCompetitor["priority"],
     evidence: parseJson<string[]>(row.evidenceJson, []),
-    status: row.status as SuggestedCompetitor["status"]
+    status: row.status as SuggestedCompetitor["status"],
+    intelligenceStatus: row.intelligenceStatus as SuggestedCompetitor["intelligenceStatus"],
+    crustdataCompanyId: row.crustdataCompanyId,
+    crustdataMatchConfidence: row.crustdataMatchConfidence,
+    identifyError: row.identifyError,
+    identifiedAt: row.identifiedAt
   };
 }
 
@@ -668,7 +1032,13 @@ function mapCompetitor(row: typeof competitors.$inferSelect): CompetitorProfile 
     headcount: row.headcount,
     hiring: row.hiring,
     funding: row.funding,
-    confidence: row.confidence
+    confidence: row.confidence,
+    intelligenceStatus: row.intelligenceStatus as CompetitorProfile["intelligenceStatus"],
+    crustdataCompanyId: row.crustdataCompanyId,
+    crustdataMatchConfidence: row.crustdataMatchConfidence,
+    crustdataProfile: parseJson<unknown>(row.crustdataProfileJson ?? "null", null),
+    enrichmentError: row.enrichmentError,
+    enrichedAt: row.enrichedAt
   };
 }
 
@@ -696,7 +1066,8 @@ function mapSignal(row: typeof signals.$inferSelect): Signal {
     evidence: evidence.map((source): Evidence => ({
       source: source.source,
       detail: source.detail,
-      freshness: source.freshness
+      freshness: source.freshness,
+      url: source.url
     })),
     meaning: row.meaning,
     recommendedMove: row.recommendedMove,
@@ -715,5 +1086,30 @@ function mapArtifact(row: typeof artifacts.$inferSelect): Artifact {
     title: row.title,
     summary: row.summary,
     bullets: parseJson<string[]>(row.bulletsJson, [])
+  };
+}
+
+function mapTrackedPage(row: typeof trackedPages.$inferSelect): TrackedPage {
+  return {
+    id: row.id,
+    competitorId: row.competitorId,
+    url: row.url,
+    pageType: row.pageType as TrackedPage["pageType"],
+    status: row.status as TrackedPage["status"],
+    lastSnapshotAt: row.lastSnapshotAt,
+    lastError: row.lastError
+  };
+}
+
+function mapPageSnapshot(row: typeof pageSnapshots.$inferSelect): PageSnapshot {
+  return {
+    id: row.id,
+    trackedPageId: row.trackedPageId,
+    url: row.url,
+    title: row.title,
+    extractedText: row.extractedText,
+    textHash: row.textHash,
+    diffSummary: row.diffSummary,
+    fetchedAt: row.fetchedAt
   };
 }

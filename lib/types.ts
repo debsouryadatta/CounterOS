@@ -7,6 +7,17 @@ export type ThreatType =
 
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 
+export type SuggestionDecision = ApprovalStatus | "verified" | "ignored" | "snoozed";
+
+export type CompanyIntelligenceStatus =
+  | "unresolved"
+  | "resolving"
+  | "resolved"
+  | "enriching"
+  | "enriched"
+  | "no_match"
+  | "failed";
+
 export type Priority = "Act now" | "Watch" | "Verify" | "Ignore";
 
 export type ActivityStatus = "Done" | "Running" | "Needs approval" | "Queued";
@@ -29,7 +40,12 @@ export type SuggestedCompetitor = {
   confidence: number;
   priority: "High" | "Medium" | "Low";
   evidence: string[];
-  status: ApprovalStatus;
+  status: SuggestionDecision;
+  intelligenceStatus: CompanyIntelligenceStatus;
+  crustdataCompanyId?: string | null;
+  crustdataMatchConfidence?: number | null;
+  identifyError?: string | null;
+  identifiedAt?: string | null;
 };
 
 export type CompetitorProfile = {
@@ -43,12 +59,19 @@ export type CompetitorProfile = {
   hiring: string;
   funding: string;
   confidence: number;
+  intelligenceStatus: CompanyIntelligenceStatus;
+  crustdataCompanyId?: string | null;
+  crustdataMatchConfidence?: number | null;
+  crustdataProfile?: unknown;
+  enrichmentError?: string | null;
+  enrichedAt?: string | null;
 };
 
 export type Evidence = {
   source: string;
   detail: string;
   freshness: string;
+  url?: string | null;
 };
 
 export type Signal = {
@@ -77,6 +100,27 @@ export type Artifact = {
   bullets: string[];
 };
 
+export type TrackedPage = {
+  id: string;
+  competitorId: string | null;
+  url: string;
+  pageType: "homepage" | "pricing" | "changelog" | "blog" | "docs" | "careers" | "other";
+  status: "active" | "paused" | "failed";
+  lastSnapshotAt: string | null;
+  lastError: string | null;
+};
+
+export type PageSnapshot = {
+  id: string;
+  trackedPageId: string;
+  url: string;
+  title: string | null;
+  extractedText: string;
+  textHash: string;
+  diffSummary: string | null;
+  fetchedAt: string;
+};
+
 export type AgentActivity = {
   id: string;
   label: string;
@@ -101,6 +145,7 @@ export type DashboardData = {
   approvedCompetitors: CompetitorProfile[];
   signals: Signal[];
   artifacts: Artifact[];
+  trackedPages: TrackedPage[];
   agentActivities: AgentActivity[];
   messages: ChatMessage[];
 };

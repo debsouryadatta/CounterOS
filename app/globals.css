@@ -561,6 +561,11 @@ input:focus {
   font-size: 14px;
 }
 
+.inline-error {
+  color: var(--red);
+  font-weight: 700;
+}
+
 .tag-row,
 .button-row {
   flex-wrap: wrap;

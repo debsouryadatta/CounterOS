@@ -8,7 +8,7 @@ const threatTypeSchema = z.enum([
   "Enterprise"
 ]);
 const competitorPrioritySchema = z.enum(["High", "Medium", "Low"]);
-const decisionSchema = z.enum(["approved", "rejected"]);
+const decisionSchema = z.enum(["approved", "rejected", "verified", "ignored", "snoozed"]);
 const confidenceSchema = z.coerce
   .number()
   .int("Confidence must be a whole number.")
@@ -99,7 +99,8 @@ export const updateSuggestedCompetitorSchema = z
 
 export const suggestedCompetitorDecisionSchema = z
   .object({
-    decision: decisionSchema
+    decision: decisionSchema,
+    reason: z.string().trim().max(500).optional()
   })
   .strict();
 
