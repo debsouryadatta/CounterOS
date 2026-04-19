@@ -694,22 +694,43 @@ export function CounterOSDashboard({
                 <button
                   key={view.id}
                   className={cn(
-                    "group flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl px-3 text-left text-[15px] font-semibold transition-colors",
+                    "group relative grid min-h-[58px] cursor-pointer grid-cols-[36px_minmax(0,1fr)] items-center gap-3 rounded-[22px] px-3 py-2 text-left transition-all",
                     activeView === view.id
-                      ? "bg-[#efedff] text-primary"
+                      ? "bg-primary text-primary-foreground shadow-[0_14px_32px_rgba(105,88,232,0.22)]"
                       : "text-[#1d1c23] hover:bg-muted"
                   )}
                   type="button"
                   onClick={() => setActiveView(view.id)}
                 >
-                  <Icon
+                  <span
                     className={cn(
-                      "size-5 shrink-0",
-                      activeView === view.id ? "text-primary" : "text-[#1d1c23]"
+                      "grid size-9 place-items-center rounded-2xl transition-colors",
+                      activeView === view.id
+                        ? "bg-white/18 text-primary-foreground"
+                        : "bg-muted text-[#1d1c23] group-hover:bg-card"
                     )}
-                    aria-hidden="true"
-                  />
-                  <span className="truncate">{view.label}</span>
+                  >
+                    <Icon className="size-5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[15px] font-semibold">
+                      {view.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "mt-0.5 block truncate text-[11px] font-medium max-[1100px]:hidden",
+                        activeView === view.id ? "text-primary-foreground/72" : "text-muted-foreground"
+                      )}
+                    >
+                      {view.description}
+                    </span>
+                  </span>
+                  {activeView === view.id && (
+                    <span
+                      className="absolute right-3 top-3 size-2 rounded-full bg-primary-foreground/80 max-[1100px]:hidden"
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               );
             })}
@@ -808,9 +829,21 @@ export function CounterOSDashboard({
             </div>
           </header>
 
-          <main className="min-h-0 overflow-y-auto overscroll-contain px-8 pb-8 max-[760px]:px-4">
+          <main
+            className={cn(
+              "min-h-0 px-8 pb-8 max-[760px]:px-4",
+              activeView === "agent"
+                ? "flex flex-col gap-5 overflow-hidden"
+                : "overflow-y-auto overscroll-contain"
+            )}
+          >
             {notice && (
-              <div className="mb-5 flex items-start gap-3 rounded-[22px] bg-[#efedff] px-5 py-4 text-sm text-primary">
+              <div
+                className={cn(
+                  "flex items-start gap-3 rounded-[22px] bg-[#efedff] px-5 py-4 text-sm text-primary",
+                  activeView === "agent" ? "shrink-0" : "mb-5"
+                )}
+              >
                 <BadgeCheck className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{notice}</span>
               </div>
@@ -868,10 +901,6 @@ export function CounterOSDashboard({
               <AgentView
                 messages={chatMessages}
                 chatInput={chatInput}
-                activities={activities}
-                suggestions={pendingSuggestions}
-                artifacts={artifacts}
-                trackedPages={trackedPages}
                 status={chatStatus}
                 error={chatError}
                 isBusy={isChatBusy}
@@ -1531,10 +1560,6 @@ function MovesView({
 function AgentView({
   messages,
   chatInput,
-  activities,
-  suggestions,
-  artifacts,
-  trackedPages,
   status,
   error,
   isBusy,
@@ -1543,10 +1568,6 @@ function AgentView({
 }: {
   messages: UIMessage[];
   chatInput: string;
-  activities: AgentActivity[];
-  suggestions: SuggestedCompetitor[];
-  artifacts: Artifact[];
-  trackedPages: TrackedPage[];
   status: ChatStatus;
   error?: Error;
   isBusy: boolean;
@@ -1554,147 +1575,103 @@ function AgentView({
   sendMessage: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const visibleSuggestions = suggestions.slice(0, 3);
-  const visibleArtifacts = artifacts.slice(0, 3);
-  const visibleTrackedPages = trackedPages.slice(0, 3);
   const lastAssistantMessageId = [...messages]
     .reverse()
     .find((message) => message.role === "assistant")?.id;
-  const hasOutputs =
-    visibleSuggestions.length > 0 ||
-    visibleArtifacts.length > 0 ||
-    visibleTrackedPages.length > 0;
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth"
+    const node = scrollRef.current;
+
+    if (!node) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
     });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [messages, status]);
 
   return (
-    <section className="space-y-5" aria-labelledby="agent-title">
+    <section className="flex min-h-0 flex-1 flex-col gap-5" aria-labelledby="agent-title">
       <PageHeader
         kicker="Agent chat"
         title="Ask the agent to run the workspace, step by step."
-        description="The agent can approve or reject explicit suggestions, run provider discovery, track pages, snapshot pages, and draft the final response with the work trail visible."
+        description="The conversation shows thinking, tool calls, approvals, created data, and the final response in one continuous stream."
       >
         <StatusBadge tone={isBusy ? "info" : "success"} label={isBusy ? "Running" : "Ready"} />
       </PageHeader>
 
-      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] gap-5 max-[1180px]:grid-cols-1">
-        <Card className="rounded-[28px] border-0 shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Bot className="size-4 text-primary" aria-hidden="true" />
-              Workspace operator
-            </CardTitle>
-            <CardDescription>Messages are stored with the workspace chat thread.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div
-              ref={scrollRef}
-              className="grid max-h-[620px] min-h-[500px] content-start gap-3 overflow-y-auto overscroll-contain rounded-xl border bg-muted/30 p-4"
-            >
-              {messages.length === 0 && (
-                <EmptyState
-                  icon={MessageSquare}
-                  title="No chat history"
-                  detail="Ask the agent to find competitors, explain signals, or draft artifacts."
-                />
-              )}
-              {messages.map((message, index) => (
-                <AgentChatMessage
-                  key={`${message.role}-${index}`}
-                  message={message}
-                  isActive={isBusy && message.id === lastAssistantMessageId}
-                />
-              ))}
-              {status === "submitted" && <AgentPendingMessage />}
-              {error && (
-                <div className="w-[min(84%,680px)] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 shadow-sm max-[720px]:w-full">
-                  {error.message}
-                </div>
-              )}
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border-0 shadow-sm">
+        <CardHeader className="shrink-0 border-b bg-card/95 px-5 py-4">
+          <div className="flex items-start justify-between gap-4 max-[720px]:grid">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-accent text-primary">
+                  <Bot className="size-4" aria-hidden="true" />
+                </span>
+                <span className="truncate">Workspace operator</span>
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Messages, tool steps, and final responses stay inside this thread.
+              </CardDescription>
             </div>
-            <form
-              className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] gap-2 max-[720px]:grid-cols-1"
-              onSubmit={sendMessage}
-            >
+            <div className="flex shrink-0 flex-wrap justify-end gap-2 max-[720px]:justify-start">
+              <StatusBadge tone={isBusy ? "info" : "success"} label={isBusy ? "Streaming" : "Ready"} />
+              <Badge variant="secondary" className="bg-muted text-muted-foreground">
+                {messages.length} message{messages.length === 1 ? "" : "s"}
+              </Badge>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+          <div
+            ref={scrollRef}
+            className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain bg-muted/25 p-5 max-[720px]:p-3"
+          >
+            {messages.length === 0 && (
+              <EmptyState
+                icon={MessageSquare}
+                title="No chat history"
+                detail="Ask the agent to find competitors, explain signals, or draft artifacts."
+              />
+            )}
+            {messages.map((message, index) => (
+              <AgentChatMessage
+                key={`${message.role}-${index}`}
+                message={message}
+                isActive={isBusy && message.id === lastAssistantMessageId}
+              />
+            ))}
+            {status === "submitted" && <AgentPendingMessage />}
+            {error && (
+              <div className="w-[min(84%,680px)] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 shadow-sm max-[720px]:w-full">
+                {error.message}
+              </div>
+            )}
+          </div>
+          <form className="shrink-0 border-t bg-card p-4 max-[720px]:p-3" onSubmit={sendMessage}>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border bg-background p-2 shadow-inner shadow-black/5 max-[720px]:grid-cols-1">
               <label className="sr-only" htmlFor="chat-input">
                 Message CounterOS
               </label>
               <Input
                 id="chat-input"
+                className="h-12 border-0 bg-transparent px-3 shadow-none focus-visible:border-transparent focus-visible:ring-0"
                 type="text"
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
                 placeholder="Ask CounterOS to discover competitors or explain a signal"
               />
-              <Button type="submit" disabled={isBusy}>
+              <Button className="h-12 rounded-xl px-5" type="submit" disabled={isBusy}>
                 {isBusy ? <Loader2 className="animate-spin" /> : <Send />}
                 {isBusy ? "Running" : "Send"}
               </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-5">
-          <Card className="rounded-[28px] border-0 shadow-sm">
-            <CardHeader>
-              <SectionHeader kicker="Activity stream" title="Agent work trail" />
-            </CardHeader>
-            <CardContent>
-              <ActivityStream activities={activities} />
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-[28px] border-0 shadow-sm">
-            <CardHeader>
-              <SectionHeader kicker="Agent outputs" title="Created or changed" />
-            </CardHeader>
-            <CardContent>
-              {!hasOutputs ? (
-                <EmptyState
-                  icon={Layers3}
-                  title="No agent outputs yet"
-                  detail="Suggestions, artifacts, and tracked pages created by chat actions will appear here."
-                />
-              ) : (
-                <div className="grid gap-4">
-                  {visibleSuggestions.map((suggestion) => (
-                    <OutputRow
-                      key={suggestion.id}
-                      icon={Target}
-                      title={suggestion.name}
-                      detail={suggestion.domain}
-                      badge="Needs review"
-                    />
-                  ))}
-                  {visibleArtifacts.map((artifact) => (
-                    <OutputRow
-                      key={artifact.id}
-                      icon={FileText}
-                      title={artifact.title}
-                      detail={artifact.summary}
-                      badge={artifact.type}
-                    />
-                  ))}
-                  {visibleTrackedPages.map((trackedPage) => (
-                    <OutputRow
-                      key={trackedPage.id}
-                      icon={Globe2}
-                      title={trackedPage.url}
-                      detail={`${trackedPage.pageType} page · ${trackedPage.status}`}
-                      badge="Tracked"
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </section>
   );
 }
@@ -1956,35 +1933,6 @@ function AgentToolTrace({ part }: { part: AgentToolPart }) {
         )}
       </div>
     </div>
-  );
-}
-
-function OutputRow({
-  icon: Icon,
-  title,
-  detail,
-  badge
-}: {
-  icon: LucideIcon;
-  title: string;
-  detail: string;
-  badge: string;
-}) {
-  return (
-    <article className="grid grid-cols-[36px_minmax(0,1fr)] gap-3 border-b pb-4 last:border-b-0 last:pb-0">
-      <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
-        <Icon className="size-4" aria-hidden="true" />
-      </div>
-      <div className="min-w-0">
-        <div className="flex items-start justify-between gap-3">
-          <strong className="min-w-0 truncate text-sm font-semibold">{title}</strong>
-          <StatusBadge tone="info" label={badge} />
-        </div>
-        <p className="m-0 mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-          {detail}
-        </p>
-      </div>
-    </article>
   );
 }
 
