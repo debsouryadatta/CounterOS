@@ -1,5 +1,3 @@
-import "server-only";
-
 import { requestCrustdata } from "./client";
 import { normalizeResultsEnvelope } from "./normalizers";
 import type {

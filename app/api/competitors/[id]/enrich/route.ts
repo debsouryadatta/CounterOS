@@ -48,6 +48,19 @@ export async function POST(
       ...(enrichment.hiring ? { hiring: enrichment.hiring } : {})
     }
   });
+  const updatedCompetitor = competitor ?? existing;
 
-  return NextResponse.json({ competitor: competitor ?? existing });
+  if (enrichment.intelligenceStatus === "failed") {
+    return NextResponse.json(
+      {
+        competitor: updatedCompetitor,
+        error: enrichment.enrichmentError ?? "Crustdata enrichment failed."
+      },
+      {
+        status: enrichment.enrichmentError?.includes("CRUSTDATA_API_KEY") ? 503 : 502
+      }
+    );
+  }
+
+  return NextResponse.json({ competitor: updatedCompetitor });
 }

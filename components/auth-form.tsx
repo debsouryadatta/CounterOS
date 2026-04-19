@@ -126,8 +126,8 @@ export function AuthForm({ mode }: AuthFormProps) {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#c5ccd3] p-8 text-foreground max-[760px]:p-0">
-      <section className="mx-auto grid min-h-[calc(100vh-64px)] w-full max-w-[1500px] grid-cols-[minmax(0,1fr)_minmax(360px,440px)] items-center gap-10 rounded-[30px] bg-background px-10 py-10 shadow-[0_28px_80px_rgba(42,48,56,0.18)] max-[920px]:grid-cols-1 max-[760px]:min-h-screen max-[760px]:rounded-none max-[560px]:px-4">
-        <div className="min-w-0">
+      <section className="mx-auto grid min-h-[calc(100vh-64px)] w-full max-w-[1500px] grid-cols-[minmax(0,1fr)_minmax(360px,440px)] items-center gap-10 rounded-[30px] bg-background px-10 py-10 shadow-[0_28px_80px_rgba(42,48,56,0.18)] max-[920px]:grid-cols-1 max-[920px]:items-stretch max-[760px]:min-h-screen max-[760px]:rounded-none max-[560px]:px-4">
+        <div className="min-w-0 max-[920px]:order-2">
           <div className="flex items-center gap-3">
             <div className="grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_10px_25px_rgba(105,88,232,0.25)]">
               <Command className="size-5" aria-hidden="true" />
@@ -192,7 +192,7 @@ export function AuthForm({ mode }: AuthFormProps) {
           </div>
         </div>
 
-        <Card className="rounded-[28px] border-0 shadow-sm">
+        <Card className="rounded-[28px] border-0 shadow-sm max-[920px]:order-1 max-[920px]:mx-auto max-[920px]:w-full max-[920px]:max-w-[480px]">
           <CardHeader className="p-6 pb-4">
             <Badge variant="outline" className="mb-3 w-fit bg-background">
               <LockKeyhole className="size-3.5" aria-hidden="true" />
@@ -205,7 +205,12 @@ export function AuthForm({ mode }: AuthFormProps) {
           </CardHeader>
 
           <CardContent className="p-6 pt-0">
-            <form className="grid gap-4" autoComplete="off" onSubmit={handleSubmit}>
+            <form
+              className="grid gap-4"
+              autoComplete="off"
+              method="post"
+              onSubmit={handleSubmit}
+            >
               {isSignup && (
                 <label className="grid gap-2">
                   <span className="text-sm font-medium">Name</span>

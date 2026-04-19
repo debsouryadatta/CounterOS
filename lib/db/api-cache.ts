@@ -1,5 +1,3 @@
-import "server-only";
-
 import { createHash, randomUUID } from "crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "./index";

@@ -8,7 +8,11 @@ import {
   type CounterOSAgentUIMessage
 } from "@/lib/ai/agent";
 import { requireWorkspace } from "@/lib/auth/workspace";
-import { appendChatTurn, recordAgentActivity } from "@/lib/db/queries";
+import {
+  appendChatTurn,
+  clearWorkspaceChatMessages,
+  recordAgentActivity
+} from "@/lib/db/queries";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -97,6 +101,18 @@ export async function POST(request: Request) {
     onError: (error) =>
       error instanceof Error ? error.message : "The agent stream failed unexpectedly."
   });
+}
+
+export async function DELETE() {
+  const auth = await requireWorkspace();
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
+  const result = clearWorkspaceChatMessages(auth.workspace.id);
+
+  return NextResponse.json(result);
 }
 
 function toLegacyUIMessage(text: string): UIMessage[] {

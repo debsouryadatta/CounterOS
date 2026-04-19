@@ -4,10 +4,12 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { DefaultChatTransport, type ChatStatus, type UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
 import { signOut } from "next-auth/react";
+import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   BellDot,
@@ -33,6 +35,7 @@ import {
   Settings,
   ShieldCheck,
   Target,
+  Trash2,
   TrendingUp,
   UserCircle,
   type LucideIcon,
@@ -60,6 +63,7 @@ import type {
   CurrentUser,
   DashboardData,
   PageSnapshot,
+  ProductProfile,
   Signal,
   SuggestedCompetitor,
   TrackedPage,
@@ -69,6 +73,7 @@ import type {
 type View = "overview" | "competitors" | "signals" | "moves" | "agent";
 
 type BadgeTone = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "muted";
+type ToastTone = "success" | "error" | "info" | "warning";
 
 const views: Array<{
   id: View;
@@ -119,6 +124,25 @@ function upsertById<TItem extends { id: string }>(items: TItem[]) {
     seen.add(item.id);
     return true;
   });
+}
+
+function emptyProductProfileDraft(): ProductProfile {
+  return {
+    name: "",
+    description: "",
+    icp: "",
+    category: "",
+    geography: "",
+    wedge: ""
+  };
+}
+
+function compactProductProfileDraft(profile: ProductProfile) {
+  return Object.fromEntries(
+    Object.entries(profile)
+      .map(([key, value]) => [key, value.trim()])
+      .filter(([, value]) => value)
+  ) as Partial<ProductProfile>;
 }
 
 type AgentToolPart = {
@@ -175,11 +199,17 @@ function labelForTool(toolName: string) {
   const labels: Record<string, string> = {
     approveSuggestion: "Approve suggestion",
     rejectSuggestion: "Reject suggestion",
+    reviewSuggestion: "Review suggestion",
+    saveProductProfile: "Save product profile",
     discoverCompetitors: "Fetch provider discovery",
     saveCompetitorSuggestion: "Save competitor suggestion",
+    enrichCompetitor: "Enrich competitor",
+    removeCompetitor: "Remove competitor",
     saveArtifact: "Save artifact",
     trackPage: "Track page",
-    snapshotTrackedPage: "Snapshot tracked page"
+    snapshotTrackedPage: "Snapshot tracked page",
+    snapshotTrackedPages: "Snapshot tracked pages",
+    generateHiringSignals: "Generate hiring signals"
   };
 
   return labels[toolName] ?? toolName.replace(/([A-Z])/g, " $1").trim();
@@ -237,12 +267,16 @@ function formatToolInput(input: unknown) {
 
 function outputBadges(output: AgentToolOutput) {
   return [
+    output.productProfile ? "profile saved" : "",
     output.suggestedCompetitors?.length
       ? `${output.suggestedCompetitors.length} suggestions`
       : "",
     output.suggestionUpdates?.length ? `${output.suggestionUpdates.length} updates` : "",
     output.approvedCompetitors?.length
       ? `${output.approvedCompetitors.length} approved`
+      : "",
+    output.removedCompetitorIds?.length
+      ? `${output.removedCompetitorIds.length} removed`
       : "",
     output.artifact ? "1 artifact" : "",
     output.trackedPages?.length ? `${output.trackedPages.length} tracked` : "",
@@ -271,6 +305,12 @@ export function CounterOSDashboard({
   user: CurrentUser;
 }) {
   const [activeView, setActiveView] = useState<View>("overview");
+  const [productProfile, setProductProfile] = useState<ProductProfile | null>(
+    initialData.productProfile
+  );
+  const [productDraft, setProductDraft] = useState<ProductProfile>(() =>
+    emptyProductProfileDraft()
+  );
   const [suggestions, setSuggestions] =
     useState<SuggestedCompetitor[]>(initialData.suggestedCompetitors);
   const [competitors, setCompetitors] =
@@ -298,19 +338,61 @@ export function CounterOSDashboard({
   const seenToolResultIds = useRef(new Set<string>());
   const {
     messages: chatMessages,
+    setMessages: setChatMessages,
     status: chatStatus,
     sendMessage: sendChatMessage,
+    clearError: clearChatError,
     error: chatError
   } = useChat<UIMessage>({
     messages: initialChatMessages,
     transport: chatTransport,
     onError: (error) => {
-      setNotice(error.message || "The agent could not complete that request.");
+      notify({
+        tone: "error",
+        title: "Agent request failed",
+        description: error.message || "The agent could not complete that request."
+      });
     }
   });
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [isSavingProductProfile, setIsSavingProductProfile] = useState(false);
+  const [isProductProfileOpen, setIsProductProfileOpen] = useState(false);
+  const [isClearingChat, setIsClearingChat] = useState(false);
+  const [isConfirmingClearChat, setIsConfirmingClearChat] = useState(false);
+  const [enrichingCompetitorId, setEnrichingCompetitorId] = useState<string | null>(null);
+  const [removingCompetitorId, setRemovingCompetitorId] = useState<string | null>(null);
+  const [confirmRemoveCompetitorId, setConfirmRemoveCompetitorId] = useState<string | null>(null);
   const isChatBusy = chatStatus === "submitted" || chatStatus === "streaming";
+
+  function notify(input: {
+    tone: ToastTone;
+    title: string;
+    description?: string;
+    notice?: string;
+  }) {
+    const noticeMessage = input.notice ?? input.description ?? input.title;
+    const options = input.description ? { description: input.description } : undefined;
+
+    setNotice(noticeMessage);
+
+    if (input.tone === "success") {
+      toast.success(input.title, options);
+      return;
+    }
+
+    if (input.tone === "error") {
+      toast.error(input.title, options);
+      return;
+    }
+
+    if (input.tone === "warning") {
+      toast.warning(input.title, options);
+      return;
+    }
+
+    toast.info(input.title, options);
+  }
 
   function mergeSignals(createdSignals: Signal[]) {
     if (createdSignals.length === 0) {
@@ -375,6 +457,9 @@ export function CounterOSDashboard({
       return;
     }
 
+    const productProfiles = outputs.flatMap((output) =>
+      output.productProfile ? [output.productProfile] : []
+    );
     const suggestedCompetitors = outputs.flatMap(
       (output) => output.suggestedCompetitors ?? []
     );
@@ -384,6 +469,9 @@ export function CounterOSDashboard({
     const approvedCompetitors = outputs.flatMap(
       (output) => output.approvedCompetitors ?? []
     );
+    const removedCompetitorIds = outputs.flatMap(
+      (output) => output.removedCompetitorIds ?? []
+    );
     const createdArtifacts = outputs.flatMap((output) =>
       output.artifact ? [output.artifact] : []
     );
@@ -391,6 +479,10 @@ export function CounterOSDashboard({
     const createdTrackedPages = outputs.flatMap((output) => output.trackedPages ?? []);
     const createdSignals = outputs.flatMap((output) => output.signals ?? []);
 
+    if (productProfiles.length) {
+      setProductProfile(productProfiles[0]);
+      setProductDraft(emptyProductProfileDraft());
+    }
     if (suggestedCompetitors.length) {
       setSuggestions((current) => upsertById([...suggestedCompetitors, ...current]));
     }
@@ -399,6 +491,10 @@ export function CounterOSDashboard({
     }
     if (approvedCompetitors.length) {
       setCompetitors((current) => upsertById([...approvedCompetitors, ...current]));
+    }
+    if (removedCompetitorIds.length) {
+      const removed = new Set(removedCompetitorIds);
+      setCompetitors((current) => current.filter((competitor) => !removed.has(competitor.id)));
     }
     if (createdArtifacts.length) {
       setArtifacts((current) => upsertById([...createdArtifacts, ...current]));
@@ -417,6 +513,109 @@ export function CounterOSDashboard({
       });
     }
   }, [chatMessages]);
+
+  async function saveProductProfileDraft(options: { showSuccess?: boolean } = {}) {
+    const payload = compactProductProfileDraft(productDraft);
+
+    if (!payload.description && !productProfile?.description) {
+      notify({
+        tone: "warning",
+        title: "Company description needed",
+        description: "Add a short description of what you are building so AI can discover relevant competitors."
+      });
+      return null;
+    }
+
+    setNotice("");
+    setIsSavingProductProfile(true);
+
+    try {
+      const response = await fetch("/api/product-profile", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        productProfile?: ProductProfile;
+        error?: string;
+      };
+
+      if (!response.ok || !result.productProfile) {
+        notify({
+          tone: "error",
+          title: "Company profile not saved",
+          description: result.error ?? "Could not save your company profile."
+        });
+        return null;
+      }
+
+      setProductProfile(result.productProfile);
+      setProductDraft(emptyProductProfileDraft());
+      setIsProductProfileOpen(false);
+
+      if (options.showSuccess !== false) {
+        notify({
+          tone: "success",
+          title: "Company profile saved",
+          description: "CounterOS can now use this context for AI competitor discovery."
+        });
+      }
+
+      return result.productProfile;
+    } finally {
+      setIsSavingProductProfile(false);
+    }
+  }
+
+  async function saveProductProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await saveProductProfileDraft();
+  }
+
+  async function discoverCompetitorsFromProfile() {
+    let profile = productProfile;
+    const payload = compactProductProfileDraft(productDraft);
+    const hasDraftChanges = Object.entries(payload).some(
+      ([key, value]) => productProfile?.[key as keyof ProductProfile] !== value
+    );
+
+    if (Object.keys(payload).length > 0 && (!profile || hasDraftChanges)) {
+      profile = await saveProductProfileDraft({ showSuccess: false });
+    }
+
+    if (!profile?.description) {
+      notify({
+        tone: "warning",
+        title: "Add your company first",
+        description: "Save a short company description before asking AI to discover competitors."
+      });
+      return;
+    }
+
+    setNotice("");
+
+    try {
+      await sendChatMessage({
+        text: `Using my saved company profile for ${profile.name}, discover 8 likely competitors with Crustdata and save them to the pending suggestions queue. Focus on this product context: ${profile.description}`
+      });
+      notify({
+        tone: "info",
+        title: "Agent discovery started",
+        description: "The Agent will save matching companies into the approval queue."
+      });
+    } catch (error) {
+      notify({
+        tone: "error",
+        title: "Discovery not started",
+        description:
+          error instanceof Error
+            ? error.message
+            : "The Agent could not start competitor discovery."
+      });
+    }
+  }
 
   async function approveSuggestion(suggestion: SuggestedCompetitor) {
     await decideSuggestion(suggestion.id, "approved");
@@ -443,7 +642,11 @@ export function CounterOSDashboard({
       });
 
       if (!response.ok) {
-        setNotice("Could not save that decision. Please try again.");
+        notify({
+          tone: "error",
+          title: "Decision not saved",
+          description: "Could not save that decision. Please try again."
+        });
         return;
       }
 
@@ -468,11 +671,14 @@ export function CounterOSDashboard({
         });
       }
 
-      setNotice(
-        decision === "approved"
-          ? "Competitor approved. Enrichment was queued server-side."
-          : "Decision saved to the review log."
-      );
+      notify({
+        tone: "success",
+        title: decision === "approved" ? "Competitor approved" : "Decision saved",
+        description:
+          decision === "approved"
+            ? "Enrichment was queued server-side."
+            : "The review log has been updated."
+      });
     } finally {
       setIsBusy(false);
     }
@@ -499,7 +705,11 @@ export function CounterOSDashboard({
       });
 
       if (!response.ok) {
-        setNotice("Could not add that competitor. Please try again.");
+        notify({
+          tone: "error",
+          title: "Competitor not added",
+          description: "Could not add that competitor. Please try again."
+        });
         return;
       }
 
@@ -509,7 +719,11 @@ export function CounterOSDashboard({
 
       setSuggestions((current) => [payload.suggestion, ...current]);
       setManualCompetitor("");
-      setNotice("Competitor suggestion saved.");
+      notify({
+        tone: "success",
+        title: "Competitor suggestion saved",
+        description: `${payload.suggestion.name} is waiting in the approval queue.`
+      });
     } finally {
       setIsBusy(false);
     }
@@ -529,37 +743,165 @@ export function CounterOSDashboard({
     try {
       await sendChatMessage({ text });
     } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "The agent could not complete that request."
-      );
+      notify({
+        tone: "error",
+        title: "Message not sent",
+        description:
+          error instanceof Error
+            ? error.message
+            : "The agent could not complete that request."
+      });
+    }
+  }
+
+  async function clearChat() {
+    if (isChatBusy || isClearingChat || chatMessages.length === 0) {
+      return;
+    }
+
+    setNotice("");
+    setIsClearingChat(true);
+
+    try {
+      const response = await fetch("/api/chat/messages", {
+        method: "DELETE"
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) {
+        notify({
+          tone: "error",
+          title: "Chat not cleared",
+          description: payload?.error ?? "Could not clear the chat history."
+        });
+        return;
+      }
+
+      setChatMessages([]);
+      clearChatError();
+      setChatInput("");
+      setIsConfirmingClearChat(false);
+      notify({
+        tone: "success",
+        title: "Chat cleared",
+        description: "The agent chat history is empty now."
+      });
+    } catch (error) {
+      notify({
+        tone: "error",
+        title: "Chat not cleared",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Could not clear the chat history."
+      });
+    } finally {
+      setIsClearingChat(false);
     }
   }
 
   async function enrichCompetitor(id: string) {
     setNotice("");
     setIsBusy(true);
+    setEnrichingCompetitorId(id);
 
     try {
       const response = await fetch(`/api/competitors/${id}/enrich`, {
         method: "POST"
       });
+      const payload = (await response.json().catch(() => ({}))) as {
+        competitor?: CompetitorProfile;
+        error?: string;
+      };
+
+      if (payload.competitor) {
+        setCompetitors((current) =>
+          current.map((competitor) =>
+            competitor.id === payload.competitor?.id ? payload.competitor : competitor
+          )
+        );
+      }
 
       if (!response.ok) {
-        setNotice("Could not enrich that competitor. Please try again.");
+        notify({
+          tone: "error",
+          title: "Enrichment failed",
+          description:
+            payload.error ?? "Crustdata enrichment failed. The row was updated with the error."
+        });
         return;
       }
 
-      const payload = (await response.json()) as { competitor: CompetitorProfile };
-      setCompetitors((current) =>
-        current.map((competitor) =>
-          competitor.id === payload.competitor.id ? payload.competitor : competitor
-        )
-      );
-      setNotice("Crustdata enrichment finished.");
+      notify({
+        tone: payload.competitor?.intelligenceStatus === "no_match" ? "warning" : "success",
+        title:
+          payload.competitor?.intelligenceStatus === "no_match"
+            ? "No confident match"
+            : "Enrichment finished",
+        description:
+          payload.competitor?.intelligenceStatus === "no_match"
+            ? "Crustdata did not return a confident company match."
+            : `${payload.competitor?.name ?? "Competitor"} profile is up to date.`
+      });
     } finally {
       setIsBusy(false);
+      setEnrichingCompetitorId(null);
+    }
+  }
+
+  async function removeCompetitor(competitor: CompetitorProfile) {
+    setNotice("");
+    setIsBusy(true);
+    setRemovingCompetitorId(competitor.id);
+
+    try {
+      const response = await fetch(`/api/competitors/${competitor.id}`, {
+        method: "DELETE"
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        pausedTrackedPages?: number;
+      };
+
+      if (!response.ok) {
+        notify({
+          tone: "error",
+          title: "Competitor not removed",
+          description: payload.error ?? "Could not remove that competitor. Please try again."
+        });
+        return;
+      }
+
+      const pausedTrackedPages =
+        payload.pausedTrackedPages ??
+        trackedPages.filter((page) => page.competitorId === competitor.id).length;
+
+      setCompetitors((current) =>
+        current.filter((item) => item.id !== competitor.id)
+      );
+      setTrackedPages((current) =>
+        current.map((page) =>
+          page.competitorId === competitor.id
+            ? {
+                ...page,
+                competitorId: null,
+                status: "paused",
+                lastError: null
+              }
+            : page
+        )
+      );
+      setConfirmRemoveCompetitorId(null);
+      notify({
+        tone: "success",
+        title: "Competitor removed",
+        description: `${competitor.name} was removed from tracking${pausedTrackedPages > 0 ? `; ${pausedTrackedPages} linked page${pausedTrackedPages === 1 ? "" : "s"} paused.` : "."}`
+      });
+    } finally {
+      setIsBusy(false);
+      setRemovingCompetitorId(null);
     }
   }
 
@@ -581,18 +923,25 @@ export function CounterOSDashboard({
       };
 
       if (!response.ok) {
-        setNotice(payload.error ?? "Could not generate signals right now.");
+        notify({
+          tone: "error",
+          title: "Signals not generated",
+          description: payload.error ?? "Could not generate signals right now."
+        });
         return;
       }
 
       const createdSignals = payload.signals ?? [];
       mergeSignals(createdSignals);
       setActiveView("signals");
-      setNotice(
-        createdSignals.length > 0
-          ? `Created ${createdSignals.length} signal${createdSignals.length === 1 ? "" : "s"} from hiring evidence.`
-          : "No hiring signals were created from the current competitor data."
-      );
+      notify({
+        tone: createdSignals.length > 0 ? "success" : "info",
+        title: createdSignals.length > 0 ? "Signals generated" : "No new hiring signals",
+        description:
+          createdSignals.length > 0
+            ? `Created ${createdSignals.length} signal${createdSignals.length === 1 ? "" : "s"} from hiring evidence.`
+            : "No hiring signals were created from the current competitor data."
+      });
     } finally {
       setIsBusy(false);
     }
@@ -602,7 +951,11 @@ export function CounterOSDashboard({
     const pagesToSnapshot = trackedPages.filter((page) => page.status !== "paused");
 
     if (pagesToSnapshot.length === 0) {
-      setNotice("Add a tracked page before running a page snapshot.");
+      notify({
+        tone: "warning",
+        title: "No pages to snapshot",
+        description: "Add a tracked page before running a page snapshot."
+      });
       return;
     }
 
@@ -661,21 +1014,27 @@ export function CounterOSDashboard({
 
       mergeSignals(createdSignals);
       setActiveView("signals");
-      setNotice(
-        `Snapshotted ${snapshotCount} page${snapshotCount === 1 ? "" : "s"}; created ${createdSignals.length} signal${createdSignals.length === 1 ? "" : "s"}${failureCount > 0 ? `; ${failureCount} failed` : ""}.`
-      );
+      notify({
+        tone: failureCount > 0 ? "warning" : createdSignals.length > 0 ? "success" : "info",
+        title:
+          failureCount > 0
+            ? "Snapshot finished with errors"
+            : createdSignals.length > 0
+              ? "Page-change signals created"
+              : "Snapshots saved",
+        description: `Snapshotted ${snapshotCount} page${snapshotCount === 1 ? "" : "s"}; created ${createdSignals.length} signal${createdSignals.length === 1 ? "" : "s"}${failureCount > 0 ? `; ${failureCount} failed` : ""}.`
+      });
     } finally {
       setIsBusy(false);
     }
   }
 
-  const workspaceTitle =
-    initialData.productProfile?.name ?? initialData.workspace.name;
+  const workspaceTitle = productProfile?.name ?? initialData.workspace.name;
 
   return (
     <div className="h-[100dvh] overflow-hidden bg-[#c5ccd3] p-8 text-foreground max-[900px]:p-0">
       <div className="mx-auto grid h-full min-h-0 max-w-[1780px] grid-cols-[260px_minmax(0,1fr)] overflow-hidden rounded-[30px] bg-background shadow-[0_28px_80px_rgba(42,48,56,0.18)] max-[1100px]:grid-cols-1 max-[1100px]:grid-rows-[auto_minmax(0,1fr)] max-[900px]:rounded-none">
-        <aside className="flex min-h-0 flex-col overflow-y-auto bg-card px-8 py-9 max-[1100px]:px-5 max-[1100px]:py-5">
+        <aside className="flex min-h-0 flex-col overflow-hidden bg-card px-8 py-9 max-[1100px]:px-5 max-[1100px]:py-5">
           <div className="flex items-center gap-3">
             <div className="grid size-10 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_10px_25px_rgba(105,88,232,0.25)]">
               <Command className="size-5" aria-hidden="true" />
@@ -735,34 +1094,6 @@ export function CounterOSDashboard({
               );
             })}
           </nav>
-
-          <section className="mt-10 max-[1100px]:hidden">
-            <p className="m-0 mb-4 text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
-              Workspace
-            </p>
-            <h2 className="m-0 text-lg font-semibold leading-snug">{workspaceTitle}</h2>
-            <p className="m-0 mt-2 text-sm leading-6 text-muted-foreground">
-              {initialData.productProfile?.description ??
-                "Add context, approve competitors, and let signals collect into one clean feed."}
-            </p>
-            <dl className="mt-5 grid gap-4">
-              <ReadinessRow
-                label="Product profile"
-                value={initialData.productProfile ? "Ready" : "Missing"}
-                complete={Boolean(initialData.productProfile)}
-              />
-              <ReadinessRow
-                label="Competitors"
-                value={competitors.length.toString()}
-                complete={competitors.length > 0}
-              />
-              <ReadinessRow
-                label="Signals"
-                value={signals.length.toString()}
-                complete={signals.length > 0}
-              />
-            </dl>
-          </section>
 
           <div className="mt-auto grid gap-2 pt-10 max-[1100px]:hidden">
             <button
@@ -834,7 +1165,7 @@ export function CounterOSDashboard({
               "min-h-0 px-8 pb-8 max-[760px]:px-4",
               activeView === "agent"
                 ? "flex flex-col gap-5 overflow-hidden"
-                : "overflow-y-auto overscroll-contain"
+                : "scrollbar-none overflow-y-auto overscroll-contain"
             )}
           >
             {notice && (
@@ -856,9 +1187,8 @@ export function CounterOSDashboard({
                 actNowCount={actNowCount}
                 averageImpact={averageImpact}
                 selectedSignal={selectedSignal}
-              hasProductProfile={Boolean(initialData.productProfile)}
+              hasProductProfile={Boolean(productProfile)}
               workspaceTitle={workspaceTitle}
-              userName={user.name || user.email}
               setActiveView={setActiveView}
               activities={activities}
             />
@@ -866,17 +1196,31 @@ export function CounterOSDashboard({
 
             {activeView === "competitors" && (
               <CompetitorsView
+                productProfile={productProfile}
+                productDraft={productDraft}
                 competitors={competitors}
                 pendingSuggestions={pendingSuggestions}
                 reviewedSuggestions={reviewedSuggestions}
                 manualCompetitor={manualCompetitor}
                 isBusy={isBusy}
+                isSavingProductProfile={isSavingProductProfile}
+                isDiscoveringWithAgent={isChatBusy}
+                isProductProfileOpen={isProductProfileOpen}
+                setProductDraft={setProductDraft}
+                setIsProductProfileOpen={setIsProductProfileOpen}
+                enrichingCompetitorId={enrichingCompetitorId}
+                removingCompetitorId={removingCompetitorId}
+                confirmRemoveCompetitorId={confirmRemoveCompetitorId}
                 setManualCompetitor={setManualCompetitor}
+                setConfirmRemoveCompetitorId={setConfirmRemoveCompetitorId}
+                saveProductProfile={saveProductProfile}
+                discoverCompetitorsFromProfile={discoverCompetitorsFromProfile}
                 addManualCompetitor={addManualCompetitor}
                 approveSuggestion={approveSuggestion}
                 rejectSuggestion={rejectSuggestion}
                 decideSuggestion={decideSuggestion}
                 enrichCompetitor={enrichCompetitor}
+                removeCompetitor={removeCompetitor}
               />
             )}
 
@@ -899,13 +1243,19 @@ export function CounterOSDashboard({
 
             {activeView === "agent" && (
               <AgentView
+                productProfile={productProfile}
                 messages={chatMessages}
                 chatInput={chatInput}
                 status={chatStatus}
                 error={chatError}
                 isBusy={isChatBusy}
+                isClearingChat={isClearingChat}
+                isConfirmingClearChat={isConfirmingClearChat}
                 setChatInput={setChatInput}
                 sendMessage={sendMessage}
+                onRequestClearChat={() => setIsConfirmingClearChat(true)}
+                onCancelClearChat={() => setIsConfirmingClearChat(false)}
+                onConfirmClearChat={clearChat}
               />
             )}
           </main>
@@ -923,7 +1273,6 @@ function OverviewView({
   selectedSignal,
   hasProductProfile,
   workspaceTitle,
-  userName,
   setActiveView,
   activities
 }: {
@@ -934,7 +1283,6 @@ function OverviewView({
   selectedSignal?: Signal;
   hasProductProfile: boolean;
   workspaceTitle: string;
-  userName: string;
   setActiveView: (view: View) => void;
   activities?: AgentActivity[];
 }) {
@@ -970,9 +1318,9 @@ function OverviewView({
             <Button
               className="h-12 rounded-full bg-[#111114] px-6 text-white hover:bg-[#1d1d22]"
               type="button"
-              onClick={() => setActiveView(selectedSignal ? "moves" : "competitors")}
+              onClick={() => setActiveView(selectedSignal ? "moves" : "agent")}
             >
-              {selectedSignal ? "Open move" : "Start now"}
+              {selectedSignal ? "Open move" : "Talk to AI"}
               <span className="grid size-8 place-items-center rounded-full bg-white text-[#111114]">
                 <ArrowRight className="size-4" aria-hidden="true" />
               </span>
@@ -980,105 +1328,76 @@ function OverviewView({
           </div>
         </section>
 
-        <div className="grid grid-cols-3 gap-6 max-[920px]:grid-cols-1">
+        <div className="grid grid-cols-3 gap-4 max-[920px]:grid-cols-1">
           <LearningPill icon={Target} value={`${competitors.length}/8 tracked`} title="Competitors" tone="purple" />
           <LearningPill icon={Radar} value={`${pendingCount} pending`} title="Approvals" tone="pink" />
           <LearningPill icon={Gauge} value={`${averageImpact}/100 impact`} title="Signals" tone="blue" />
         </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="m-0 text-[26px] font-semibold tracking-tight">Continue monitoring</h2>
-          <div className="flex gap-3">
-            <Button className="size-11 rounded-full bg-card" size="icon" variant="ghost" type="button">
-              <ArrowRight className="size-4 rotate-180 text-primary" aria-hidden="true" />
-            </Button>
-            <Button className="size-11 rounded-full" size="icon" type="button" onClick={() => setActiveView("signals")}>
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Button>
+        <div className="flex items-end justify-between gap-4 max-[720px]:grid">
+          <div>
+            <h2 className="m-0 text-[26px] font-semibold tracking-tight">Continue monitoring</h2>
+            <p className="m-0 mt-1 text-sm leading-6 text-muted-foreground">
+              The active queue, signal pressure, and AI work trail in one glance.
+            </p>
           </div>
+          <Button className="h-11 rounded-full bg-card" variant="outline" type="button" onClick={() => setActiveView("agent")}>
+            <Bot className="size-4" aria-hidden="true" />
+            Talk to AI
+          </Button>
         </div>
 
-        <div className="grid grid-cols-3 gap-6 max-[1180px]:grid-cols-2 max-[720px]:grid-cols-1">
+        <div className="grid grid-cols-3 gap-5 max-[1180px]:grid-cols-2 max-[720px]:grid-cols-1">
           <MonitorCard
             icon={Radar}
+            tone="violet"
             tag="Priority signal"
             title={selectedSignal?.title ?? "No signal selected yet"}
             detail={selectedSignal?.summary ?? "Signals will appear after collection jobs write evidence."}
-            value={selectedSignal ? `${selectedSignal.impactScore}%` : "0%"}
+            metric={selectedSignal ? `${selectedSignal.impactScore}/100` : "0/100"}
+            metricLabel={`${actNowCount} act-now`}
+            progress={selectedSignal?.impactScore ?? 0}
+            actionLabel="Review"
             onOpen={() => setActiveView("signals")}
           />
           <MonitorCard
             icon={Target}
-            tag="Competitors"
+            tone="emerald"
+            tag="Competitor queue"
             title={`${competitors.length} companies tracked`}
             detail="Review the queue, approve the right companies, and enrich their profiles."
-            value={`${pendingCount}`}
+            metric={`${competitors.length}/8`}
+            metricLabel={`${pendingCount} pending`}
+            progress={Math.min(100, (competitors.length / 8) * 100)}
+            actionLabel="Open queue"
             onOpen={() => setActiveView("competitors")}
           />
           <MonitorCard
             icon={Bot}
+            tone="amber"
             tag="Agent"
-            title="Ask for discovery"
-            detail="The agent can discover competitors, track pages, and create artifacts."
-            value={`${activities?.length ?? 0}`}
+            title="AI operator is ready"
+            detail="Use the agent to run discovery, approvals, tracking, snapshots, signal generation, and artifacts."
+            metric={`${activities?.length ?? 0}`}
+            metricLabel="workspace actions"
+            progress={Math.min(100, (activities?.length ?? 0) * 18)}
+            actionLabel="Talk to AI"
             onOpen={() => setActiveView("agent")}
           />
         </div>
       </div>
 
-      <aside className="min-w-0 space-y-7">
-        <section className="rounded-[28px] bg-card p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="m-0 text-[26px] font-semibold tracking-tight">Statistic</h2>
-            <Button size="icon" variant="ghost" type="button" aria-label="Open statistics">
-              <Settings className="size-5 text-muted-foreground" aria-hidden="true" />
-            </Button>
-          </div>
-          <div className="mt-7 grid place-items-center">
-            <div className="relative grid size-[190px] place-items-center rounded-full border-[10px] border-[#eeeaf8]">
-              <div
-                className="absolute inset-[-10px] rounded-full border-[10px] border-primary border-l-transparent border-b-transparent"
-                aria-hidden="true"
-              />
-              <div className="grid size-[110px] place-items-center rounded-full bg-[#eee7f2]">
-                <UserCircle className="size-16 text-[#3b3645]" aria-hidden="true" />
-              </div>
-              <span className="absolute right-2 top-5 rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-white">
-                {averageImpact || 0}%
-              </span>
-            </div>
-          </div>
-          <h3 className="m-0 mt-5 text-center text-[24px] font-semibold">
-            Good Morning {userName.split("@")[0].split(" ")[0] || "Founder"}
-          </h3>
-          <p className="m-0 mt-1 text-center text-sm text-muted-foreground">
-            Continue tracking to catch your next useful move.
-          </p>
-          <div className="mt-8 rounded-[24px] bg-[#f3f4f9] p-5">
-            <div className="grid grid-cols-5 items-end gap-4">
-              {[34, 48, 35, 60, 32].map((height, index) => (
-                <div key={index} className="grid gap-3">
-                  <div
-                    className={cn(
-                      "rounded-lg",
-                      index === 1 || index === 3 ? "bg-primary" : "bg-[#d9d2fb]"
-                    )}
-                    style={{ height }}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 flex justify-between text-xs text-muted-foreground">
-              <span>Competitors</span>
-              <span>Signals</span>
-              <span>Moves</span>
-            </div>
-          </div>
-        </section>
+      <aside className="min-w-0 space-y-5">
+        <AgentCommandCenter
+          competitorCount={competitors.length}
+          pendingCount={pendingCount}
+          actNowCount={actNowCount}
+          setActiveView={setActiveView}
+        />
 
         <section className="rounded-[28px] bg-card p-6 shadow-sm">
           <div className="mb-5 flex items-center justify-between gap-3">
-            <h2 className="m-0 text-[24px] font-semibold tracking-tight">Agent work</h2>
+            <h2 className="m-0 text-[24px] font-semibold tracking-tight">Latest agent work</h2>
             <Button className="size-11 rounded-full" size="icon" variant="outline" type="button" onClick={() => setActiveView("agent")}>
               <Plus className="size-4" aria-hidden="true" />
             </Button>
@@ -1087,6 +1406,113 @@ function OverviewView({
         </section>
       </aside>
     </section>
+  );
+}
+
+function AgentCommandCenter({
+  competitorCount,
+  pendingCount,
+  actNowCount,
+  setActiveView
+}: {
+  competitorCount: number;
+  pendingCount: number;
+  actNowCount: number;
+  setActiveView: (view: View) => void;
+}) {
+  const capabilities = [
+    {
+      icon: Target,
+      label: "Competitors",
+      detail: "Discover, save, approve, enrich, remove"
+    },
+    {
+      icon: Globe2,
+      label: "Pages",
+      detail: "Track URLs, snapshot pages, detect changes"
+    },
+    {
+      icon: Radar,
+      label: "Signals",
+      detail: "Generate hiring signals and review evidence"
+    },
+    {
+      icon: FileText,
+      label: "Artifacts",
+      detail: "Create battlecards, memos, target accounts"
+    }
+  ];
+
+  return (
+    <section className="overflow-hidden rounded-[28px] bg-[#17161f] p-6 text-white shadow-[0_24px_55px_rgba(23,22,31,0.24)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="grid size-12 place-items-center rounded-full bg-white text-primary">
+          <Bot className="size-6" aria-hidden="true" />
+        </div>
+        <StatusBadge tone="success" label="Ready" />
+      </div>
+      <p className="m-0 mt-7 text-[13px] font-semibold uppercase tracking-[0.32em] text-white/60">
+        AI operator
+      </p>
+      <h2 className="m-0 mt-3 text-[32px] font-semibold leading-tight tracking-tight">
+        Talk to AI and run the workspace.
+      </h2>
+      <p className="m-0 mt-4 text-sm leading-6 text-white/68">
+        The Agent can handle the full loop from product context to competitor discovery,
+        page checks, signal creation, and saved response assets.
+      </p>
+      <Button
+        className="mt-6 h-12 rounded-full bg-white px-5 text-[#17161f] hover:bg-white/90"
+        type="button"
+        onClick={() => setActiveView("agent")}
+      >
+        <MessageSquare className="size-4" aria-hidden="true" />
+        Talk to AI
+      </Button>
+
+      <ul className="m-0 mt-7 grid gap-0 p-0">
+        {capabilities.map((item) => (
+          <AgentCapability key={item.label} {...item} />
+        ))}
+      </ul>
+
+      <div className="mt-7 grid grid-cols-3 border-t border-white/10 pt-5 text-center">
+        <AgentStat value={competitorCount.toString()} label="Tracked" />
+        <AgentStat value={pendingCount.toString()} label="Pending" />
+        <AgentStat value={actNowCount.toString()} label="Act now" />
+      </div>
+    </section>
+  );
+}
+
+function AgentCapability({
+  icon: Icon,
+  label,
+  detail
+}: {
+  icon: LucideIcon;
+  label: string;
+  detail: string;
+}) {
+  return (
+    <li className="flex items-start gap-3 border-t border-white/10 py-3 first:border-t-0 first:pt-0">
+      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-white/10 text-white">
+        <Icon className="size-4" aria-hidden="true" />
+      </span>
+      <span className="min-w-0">
+        <strong className="block text-sm font-semibold">{label}</strong>
+        <span className="mt-1 block text-xs leading-5 text-white/58">{detail}</span>
+      </span>
+    </li>
+  );
+}
+
+function AgentStat({ value, label }: { value: string; label: string }) {
+  return (
+    <div>
+      <strong className="block text-2xl font-semibold leading-none">{value}</strong>
+      <span className="mt-1 block text-xs font-medium uppercase text-white/50">{label}</span>
+    </div>
   );
 }
 
@@ -1108,13 +1534,13 @@ function LearningPill({
   }[tone];
 
   return (
-    <article className="flex min-h-[92px] items-center gap-5 rounded-[24px] bg-card px-5 shadow-sm">
-      <div className={cn("grid size-14 place-items-center rounded-full", toneClass)}>
-        <Icon className="size-6" aria-hidden="true" />
+    <article className="grid min-h-[72px] grid-cols-[44px_minmax(0,1fr)] items-center gap-3 rounded-[20px] bg-card px-4 py-3 shadow-sm">
+      <div className={cn("grid size-11 place-items-center rounded-full", toneClass)}>
+        <Icon className="size-5" aria-hidden="true" />
       </div>
       <div className="min-w-0">
-        <p className="m-0 text-base text-muted-foreground">{value}</p>
-        <h3 className="m-0 mt-1 truncate text-[20px] font-semibold tracking-tight">{title}</h3>
+        <p className="m-0 truncate text-sm leading-5 text-muted-foreground">{value}</p>
+        <h3 className="m-0 truncate text-[17px] font-semibold leading-6 tracking-tight">{title}</h3>
       </div>
     </article>
   );
@@ -1122,42 +1548,87 @@ function LearningPill({
 
 function MonitorCard({
   icon: Icon,
+  tone,
   tag,
   title,
   detail,
-  value,
+  metric,
+  metricLabel,
+  progress,
+  actionLabel,
   onOpen
 }: {
   icon: LucideIcon;
+  tone: "violet" | "emerald" | "amber";
   tag: string;
   title: string;
   detail: string;
-  value: string;
+  metric: string;
+  metricLabel: string;
+  progress: number;
+  actionLabel: string;
   onOpen: () => void;
 }) {
+  const toneClass = {
+    violet: {
+      icon: "bg-[#efedff] text-primary",
+      badge: "bg-[#efedff] text-primary",
+      metric: "bg-[#f5f2ff] text-primary",
+      bar: "bg-primary"
+    },
+    emerald: {
+      icon: "bg-[#eaf8f0] text-[#168553]",
+      badge: "bg-[#eaf8f0] text-[#168553]",
+      metric: "bg-[#f1fbf5] text-[#168553]",
+      bar: "bg-[#1fa463]"
+    },
+    amber: {
+      icon: "bg-[#fff4dc] text-[#b56b0f]",
+      badge: "bg-[#fff4dc] text-[#b56b0f]",
+      metric: "bg-[#fff8e9] text-[#b56b0f]",
+      bar: "bg-[#e49a24]"
+    }
+  }[tone];
+  const normalizedProgress = Math.max(0, Math.min(100, progress));
+
   return (
-    <article className="overflow-hidden rounded-[28px] bg-card shadow-sm">
-      <div className="h-[150px] bg-[#d9dce3] p-5">
-        <div className="ml-auto grid size-10 place-items-center rounded-full bg-black/22 text-white backdrop-blur-sm">
-          <Icon className="size-5" aria-hidden="true" />
+    <article className="group flex min-h-[232px] flex-col rounded-[22px] border border-white bg-card p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-[0_18px_38px_rgba(42,48,56,0.12)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className={cn("grid size-10 place-items-center rounded-2xl", toneClass.icon)}>
+          <Icon className="size-4" aria-hidden="true" />
         </div>
-      </div>
-      <div className="p-5">
-        <Badge variant="secondary" className="mb-3 bg-[#efedff] text-primary">
+        <Badge variant="secondary" className={cn("max-w-[170px] truncate rounded-full", toneClass.badge)}>
           {tag}
         </Badge>
-        <h3 className="m-0 min-h-[58px] text-[21px] font-semibold leading-tight tracking-tight">
-          {title}
-        </h3>
-        <p className="m-0 mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
-          {detail}
-        </p>
-        <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-muted">
-          <span className="block h-full w-[68%] rounded-full bg-primary" />
+      </div>
+
+      <h3 className="m-0 mt-5 line-clamp-2 min-h-[52px] text-[20px] font-semibold leading-[1.28] tracking-tight">
+        {title}
+      </h3>
+
+      <p className="m-0 mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+        {detail}
+      </p>
+
+      <div className="mt-auto pt-5">
+        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-medium text-muted-foreground">
+          <span>{metricLabel}</span>
+          <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold", toneClass.metric)}>
+            {metric}
+          </span>
         </div>
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-muted-foreground">{value}</span>
-          <Button className="size-10 rounded-full" size="icon" variant="outline" type="button" onClick={onOpen}>
+        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <span
+            className={cn("block h-full rounded-full", toneClass.bar)}
+            style={{ width: `${normalizedProgress}%` }}
+          />
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <span className="text-xs font-medium text-muted-foreground">
+            {Math.round(normalizedProgress)}%
+          </span>
+          <Button className="h-9 rounded-full px-4 text-sm" variant="outline" type="button" onClick={onOpen}>
+            {actionLabel}
             <ArrowRight className="size-4" aria-hidden="true" />
           </Button>
         </div>
@@ -1166,25 +1637,218 @@ function MonitorCard({
   );
 }
 
+function ProductProfilePanel({
+  productProfile,
+  productDraft,
+  isSaving,
+  isDiscovering,
+  isOpen,
+  setProductDraft,
+  setIsOpen,
+  onSave,
+  onDiscover
+}: {
+  productProfile: ProductProfile | null;
+  productDraft: ProductProfile;
+  isSaving: boolean;
+  isDiscovering: boolean;
+  isOpen: boolean;
+  setProductDraft: (profile: ProductProfile) => void;
+  setIsOpen: (isOpen: boolean) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onDiscover: () => Promise<void>;
+}) {
+  const draftPayload = compactProductProfileDraft(productDraft);
+  const hasDraftValues = Object.keys(draftPayload).length > 0;
+  const hasDescription = Boolean(productDraft.description.trim() || productProfile?.description);
+  const canSave = productProfile ? hasDraftValues : Boolean(productDraft.description.trim());
+
+  function updateField(field: keyof ProductProfile, value: string) {
+    setProductDraft({ ...productDraft, [field]: value });
+  }
+
+  return (
+    <Card className="rounded-[22px] border-0 shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between gap-4 max-[760px]:grid">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-accent text-primary">
+              <Command className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="m-0 text-xs font-semibold uppercase text-muted-foreground">
+                Your company
+              </p>
+              <h2 className="m-0 mt-1 truncate text-lg font-semibold leading-tight">
+                {productProfile?.description
+                  ? "Company context is saved."
+                  : "Add company context for AI discovery."}
+              </h2>
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 max-[760px]:justify-start">
+            <StatusBadge
+              tone={productProfile?.description ? "success" : "warning"}
+              label={productProfile?.description ? "Context saved" : "Needs description"}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={isSaving || isDiscovering || !hasDescription}
+              onClick={onDiscover}
+            >
+              {isDiscovering ? <Loader2 className="animate-spin" /> : <Search />}
+              {isDiscovering ? "Finding..." : "Find competitors"}
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              aria-expanded={isOpen}
+              aria-label={isOpen ? "Close company form" : "Open company form"}
+              onClick={() => setIsOpen(!isOpen)}
+            >
+              <Plus className={cn("transition-transform", isOpen && "rotate-45")} />
+            </Button>
+          </div>
+        </div>
+
+        {isOpen && (
+          <form className="mt-4 grid gap-5 border-t pt-4" onSubmit={onSave} autoComplete="off">
+          <div className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)] gap-4 max-[980px]:grid-cols-1">
+            <div className="grid gap-3">
+              <label className="grid gap-1.5 text-sm font-medium">
+                <span>Company or product</span>
+                <Input
+                  autoComplete="off"
+                  value={productDraft.name}
+                  onChange={(event) => updateField("name", event.target.value)}
+                  placeholder="Submagic"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
+                <label className="grid gap-1.5 text-sm font-medium">
+                  <span>Category</span>
+                  <Input
+                    autoComplete="off"
+                    value={productDraft.category}
+                    onChange={(event) => updateField("category", event.target.value)}
+                    placeholder="AI video editing"
+                  />
+                </label>
+                <label className="grid gap-1.5 text-sm font-medium">
+                  <span>Geography</span>
+                  <Input
+                    autoComplete="off"
+                    value={productDraft.geography}
+                    onChange={(event) => updateField("geography", event.target.value)}
+                    placeholder="US, India, global"
+                  />
+                </label>
+              </div>
+              <label className="grid gap-1.5 text-sm font-medium">
+                <span>Ideal customer</span>
+                <Input
+                  autoComplete="off"
+                  value={productDraft.icp}
+                  onChange={(event) => updateField("icp", event.target.value)}
+                  placeholder="Creators, marketers, agencies"
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-3">
+              <label className="grid gap-1.5 text-sm font-medium">
+                <span>What you are building</span>
+                <textarea
+                  className="min-h-[118px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground shadow-xs outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"
+                  autoComplete="off"
+                  value={productDraft.description}
+                  onChange={(event) => updateField("description", event.target.value)}
+                  placeholder="A product that helps teams create short-form videos with AI captions, hooks, templates, and workflow automation."
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm font-medium">
+                <span>Differentiator</span>
+                <Input
+                  autoComplete="off"
+                  value={productDraft.wedge}
+                  onChange={(event) => updateField("wedge", event.target.value)}
+                  placeholder="Faster workflow, better automation, lower production cost"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSaving || isDiscovering || !hasDescription}
+              onClick={onDiscover}
+            >
+              {isDiscovering ? <Loader2 className="animate-spin" /> : <Search />}
+              {isDiscovering ? "Finding..." : "Find competitors with AI"}
+            </Button>
+            <Button type="submit" disabled={isSaving || !canSave}>
+              {isSaving ? <Loader2 className="animate-spin" /> : <Check />}
+              {isSaving ? "Saving..." : "Save company"}
+            </Button>
+          </div>
+          </form>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CompetitorsView({
+  productProfile,
+  productDraft,
   competitors,
   pendingSuggestions,
   reviewedSuggestions,
   manualCompetitor,
   isBusy,
+  isSavingProductProfile,
+  isDiscoveringWithAgent,
+  isProductProfileOpen,
+  setProductDraft,
+  setIsProductProfileOpen,
+  enrichingCompetitorId,
+  removingCompetitorId,
+  confirmRemoveCompetitorId,
   setManualCompetitor,
+  setConfirmRemoveCompetitorId,
+  saveProductProfile,
+  discoverCompetitorsFromProfile,
   addManualCompetitor,
   approveSuggestion,
   rejectSuggestion,
   decideSuggestion,
-  enrichCompetitor
+  enrichCompetitor,
+  removeCompetitor
 }: {
+  productProfile: ProductProfile | null;
+  productDraft: ProductProfile;
   competitors: CompetitorProfile[];
   pendingSuggestions: SuggestedCompetitor[];
   reviewedSuggestions: SuggestedCompetitor[];
   manualCompetitor: string;
   isBusy: boolean;
+  isSavingProductProfile: boolean;
+  isDiscoveringWithAgent: boolean;
+  isProductProfileOpen: boolean;
+  setProductDraft: (profile: ProductProfile) => void;
+  setIsProductProfileOpen: (isOpen: boolean) => void;
+  enrichingCompetitorId: string | null;
+  removingCompetitorId: string | null;
+  confirmRemoveCompetitorId: string | null;
   setManualCompetitor: (value: string) => void;
+  setConfirmRemoveCompetitorId: (id: string | null) => void;
+  saveProductProfile: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  discoverCompetitorsFromProfile: () => Promise<void>;
   addManualCompetitor: (event: FormEvent<HTMLFormElement>) => void;
   approveSuggestion: (suggestion: SuggestedCompetitor) => Promise<void>;
   rejectSuggestion: (id: string) => Promise<void>;
@@ -1193,6 +1857,7 @@ function CompetitorsView({
     decision: "approved" | "rejected" | "verified" | "ignored" | "snoozed"
   ) => Promise<void>;
   enrichCompetitor: (id: string) => Promise<void>;
+  removeCompetitor: (competitor: CompetitorProfile) => Promise<void>;
 }) {
   return (
     <section className="space-y-5" aria-labelledby="competitors-title">
@@ -1221,6 +1886,18 @@ function CompetitorsView({
           </Button>
         </form>
       </PageHeader>
+
+      <ProductProfilePanel
+        productProfile={productProfile}
+        productDraft={productDraft}
+        isSaving={isSavingProductProfile}
+        isDiscovering={isDiscoveringWithAgent}
+        isOpen={isProductProfileOpen}
+        setProductDraft={setProductDraft}
+        setIsOpen={setIsProductProfileOpen}
+        onSave={saveProductProfile}
+        onDiscover={discoverCompetitorsFromProfile}
+      />
 
       <Card className="rounded-[28px] border-0 shadow-sm">
         <CardHeader>
@@ -1274,14 +1951,21 @@ function CompetitorsView({
                 <span>Company</span>
                 <span>Threat</span>
                 <span>Coverage</span>
-                <span>Action</span>
+                <span>Actions</span>
               </div>
               <div className="divide-y">
                 {competitors.map((competitor) => (
                   <CompetitorRow
                     key={competitor.id}
                     competitor={competitor}
+                    isBusy={isBusy}
+                    isEnriching={enrichingCompetitorId === competitor.id}
+                    isRemoving={removingCompetitorId === competitor.id}
+                    isConfirmingRemove={confirmRemoveCompetitorId === competitor.id}
                     onEnrich={() => enrichCompetitor(competitor.id)}
+                    onRequestRemove={() => setConfirmRemoveCompetitorId(competitor.id)}
+                    onCancelRemove={() => setConfirmRemoveCompetitorId(null)}
+                    onConfirmRemove={() => removeCompetitor(competitor)}
                   />
                 ))}
               </div>
@@ -1347,11 +2031,11 @@ function SignalsView({
             onClick={snapshotTrackedPages}
           >
             {isBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-            Snapshot pages
+            Check page changes
           </Button>
           <Button type="button" disabled={isBusy} onClick={generateHiringSignals}>
             {isBusy ? <Loader2 className="animate-spin" /> : <Database />}
-            Generate signals
+            Check hiring signals
           </Button>
         </div>
       </PageHeader>
@@ -1558,23 +2242,48 @@ function MovesView({
 }
 
 function AgentView({
+  productProfile,
   messages,
   chatInput,
   status,
   error,
   isBusy,
+  isClearingChat,
+  isConfirmingClearChat,
   setChatInput,
-  sendMessage
+  sendMessage,
+  onRequestClearChat,
+  onCancelClearChat,
+  onConfirmClearChat
 }: {
+  productProfile: ProductProfile | null;
   messages: UIMessage[];
   chatInput: string;
   status: ChatStatus;
   error?: Error;
   isBusy: boolean;
+  isClearingChat: boolean;
+  isConfirmingClearChat: boolean;
   setChatInput: (value: string) => void;
   sendMessage: (event: FormEvent<HTMLFormElement>) => void;
+  onRequestClearChat: () => void;
+  onCancelClearChat: () => void;
+  onConfirmClearChat: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const quickPrompts = [
+    {
+      label: "Save company",
+      value:
+        "Save my company profile: we are building [describe product, customer, category, geography, differentiator]."
+    },
+    {
+      label: "Find competitors",
+      value: productProfile?.description
+        ? `Using my saved company profile for ${productProfile.name}, discover likely competitors with Crustdata and save them to the pending suggestions queue.`
+        : "After I describe my company, save that context and discover likely competitors with Crustdata."
+    }
+  ];
   const lastAssistantMessageId = [...messages]
     .reverse()
     .find((message) => message.role === "assistant")?.id;
@@ -1611,8 +2320,58 @@ function AgentView({
               <Badge variant="secondary" className="bg-muted text-muted-foreground">
                 {messages.length} message{messages.length === 1 ? "" : "s"}
               </Badge>
+              <Button
+                className="h-8 rounded-full text-muted-foreground hover:text-destructive"
+                size="sm"
+                variant="outline"
+                type="button"
+                disabled={isBusy || isClearingChat || messages.length === 0}
+                onClick={onRequestClearChat}
+                aria-label="Clear chat"
+                title="Clear chat"
+              >
+                {isClearingChat ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                {isClearingChat ? "Clearing" : "Clear"}
+              </Button>
             </div>
           </div>
+          {isConfirmingClearChat && (
+            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-red-950">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" aria-hidden="true" />
+                  <p className="m-0 text-sm leading-6">
+                    <span className="font-semibold">Clear chat history?</span>{" "}
+                    <span className="text-red-800">
+                      This removes saved messages for this workspace.
+                    </span>
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    className="border-red-200 bg-white/80 hover:bg-white"
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    disabled={isClearingChat}
+                    onClick={onCancelClearChat}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    type="button"
+                    disabled={isBusy || isClearingChat}
+                    onClick={onConfirmClearChat}
+                  >
+                    {isClearingChat ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                    {isClearingChat ? "Clearing..." : "Clear chat"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col p-0">
           <div
@@ -1623,7 +2382,7 @@ function AgentView({
               <EmptyState
                 icon={MessageSquare}
                 title="No chat history"
-                detail="Ask the agent to find competitors, explain signals, or draft artifacts."
+                detail="Describe your company, ask the agent to find competitors, explain signals, or draft artifacts."
               />
             )}
             {messages.map((message, index) => (
@@ -1641,6 +2400,21 @@ function AgentView({
             )}
           </div>
           <form className="shrink-0 border-t bg-card p-4 max-[720px]:p-3" onSubmit={sendMessage}>
+            <div className="mb-3 flex flex-wrap gap-2">
+              {quickPrompts.map((prompt) => (
+                <Button
+                  key={prompt.label}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => setChatInput(prompt.value)}
+                >
+                  {prompt.label === "Save company" ? <Command /> : <Search />}
+                  {prompt.label}
+                </Button>
+              ))}
+            </div>
             <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border bg-background p-2 shadow-inner shadow-black/5 max-[720px]:grid-cols-1">
               <label className="sr-only" htmlFor="chat-input">
                 Message CounterOS
@@ -1651,7 +2425,7 @@ function AgentView({
                 type="text"
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
-                placeholder="Ask CounterOS to discover competitors or explain a signal"
+                placeholder="Describe your company, discover competitors, or explain a signal"
               />
               <Button className="h-12 rounded-xl px-5" type="submit" disabled={isBusy}>
                 {isBusy ? <Loader2 className="animate-spin" /> : <Send />}
@@ -2078,10 +2852,24 @@ function SuggestionCard({
 
 function CompetitorRow({
   competitor,
-  onEnrich
+  isBusy,
+  isEnriching,
+  isRemoving,
+  isConfirmingRemove,
+  onEnrich,
+  onRequestRemove,
+  onCancelRemove,
+  onConfirmRemove
 }: {
   competitor: CompetitorProfile;
+  isBusy: boolean;
+  isEnriching: boolean;
+  isRemoving: boolean;
+  isConfirmingRemove: boolean;
   onEnrich: () => void;
+  onRequestRemove: () => void;
+  onCancelRemove: () => void;
+  onConfirmRemove: () => void;
 }) {
   return (
     <article className="grid grid-cols-[minmax(220px,1.15fr)_minmax(160px,0.8fr)_minmax(180px,0.85fr)_auto] items-center gap-4 bg-background px-4 py-4 max-[980px]:grid-cols-1">
@@ -2110,10 +2898,25 @@ function CompetitorRow({
         <Fact label="Funding" value={competitor.funding} />
       </dl>
 
-      <div className="flex justify-end max-[980px]:justify-start">
-        <Button variant="outline" type="button" onClick={onEnrich}>
-          <RefreshCw />
-          Enrich
+      <div className="flex flex-wrap justify-end gap-2 max-[980px]:justify-start">
+        <Button
+          variant="outline"
+          type="button"
+          disabled={isBusy || isEnriching || isRemoving}
+          onClick={onEnrich}
+        >
+          {isEnriching ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          {isEnriching ? "Enriching..." : "Enrich"}
+        </Button>
+        <Button
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          variant="ghost"
+          type="button"
+          disabled={isBusy || isEnriching || isRemoving}
+          onClick={onRequestRemove}
+        >
+          <Trash2 />
+          Remove
         </Button>
       </div>
 
@@ -2121,6 +2924,45 @@ function CompetitorRow({
         <p className="col-span-full m-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {competitor.enrichmentError}
         </p>
+      )}
+
+      {isConfirmingRemove && (
+        <div className="col-span-full rounded-xl border border-red-200 bg-red-50 p-4 text-red-950">
+          <div className="grid grid-cols-[40px_minmax(0,1fr)] gap-3">
+            <div className="grid size-10 place-items-center rounded-lg border border-red-200 bg-white/70 text-red-600">
+              <AlertTriangle className="size-4" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <h4 className="m-0 text-sm font-semibold">
+                Remove {competitor.name} from tracking?
+              </h4>
+              <p className="m-0 mt-1 text-sm leading-6 text-red-800">
+                The company leaves the approved list and linked tracked pages are paused.
+                Historical signals stay available for reference.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button
+              className="border-red-200 bg-white/80 hover:bg-white"
+              variant="outline"
+              type="button"
+              disabled={isRemoving}
+              onClick={onCancelRemove}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              disabled={isBusy || isRemoving}
+              onClick={onConfirmRemove}
+            >
+              {isRemoving ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              {isRemoving ? "Removing..." : "Remove tracking"}
+            </Button>
+          </div>
+        </div>
       )}
     </article>
   );
@@ -2278,35 +3120,6 @@ function ConfidenceBadge({ value }: { value: number }) {
     >
       <span className="text-lg font-semibold leading-none">{value}%</span>
       <small className="text-[11px] font-medium text-muted-foreground">match</small>
-    </div>
-  );
-}
-
-function ReadinessRow({
-  label,
-  value,
-  complete
-}: {
-  label: string;
-  value: string;
-  complete: boolean;
-}) {
-  return (
-    <div>
-      <dt className="text-xs font-medium uppercase text-muted-foreground">{label}</dt>
-      <dd className="m-0 mt-1 flex items-center justify-between gap-3 text-sm">
-        <span>{value}</span>
-        <span
-          className={cn(
-            "grid size-5 place-items-center rounded-full border",
-            complete
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-amber-200 bg-amber-50 text-amber-700"
-          )}
-        >
-          {complete ? <Check className="size-3" /> : <Clock3 className="size-3" />}
-        </span>
-      </dd>
     </div>
   );
 }

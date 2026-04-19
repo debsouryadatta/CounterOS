@@ -46,16 +46,16 @@ export async function PATCH(request: Request) {
   const existingProfile = getProductProfile(auth.workspace.id);
 
   if (!existingProfile) {
-    if (!isCompleteProductProfile(parsed.data)) {
+    if (!parsed.data.description?.trim()) {
       return NextResponse.json(
-        { error: "Create the first product profile with all profile fields." },
+        { error: "Add a short description of what you are building first." },
         { status: 400 }
       );
     }
 
     const productProfile = createProductProfile({
       workspaceId: auth.workspace.id,
-      profile: parsed.data
+      profile: completeProductProfile(parsed.data, auth.workspace.name)
     });
 
     return NextResponse.json({ productProfile });
@@ -73,15 +73,16 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ productProfile });
 }
 
-function isCompleteProductProfile(
-  value: Partial<ProductProfile>
-): value is ProductProfile {
-  return Boolean(
-    value.name &&
-      value.description &&
-      value.icp &&
-      value.category &&
-      value.geography &&
-      value.wedge
-  );
+function completeProductProfile(
+  value: Partial<ProductProfile>,
+  fallbackName: string
+): ProductProfile {
+  return {
+    name: value.name?.trim() || fallbackName || "My company",
+    description: value.description?.trim() || "Not specified yet.",
+    icp: value.icp?.trim() || "Not specified yet.",
+    category: value.category?.trim() || "Not specified yet.",
+    geography: value.geography?.trim() || "Not specified yet.",
+    wedge: value.wedge?.trim() || "Not specified yet."
+  };
 }

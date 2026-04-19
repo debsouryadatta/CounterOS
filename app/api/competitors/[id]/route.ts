@@ -113,5 +113,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Competitor not found." }, { status: 404 });
   }
 
-  return NextResponse.json({ deleted: true });
+  return NextResponse.json({
+    deleted: true,
+    competitor: deleted.competitor,
+    pausedTrackedPages: deleted.pausedTrackedPages
+  });
 }

@@ -81,12 +81,28 @@ select {
 }
 
 button {
+  cursor: pointer;
   letter-spacing: 0;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
 }
 
 ::selection {

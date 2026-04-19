@@ -21,6 +21,9 @@ export function createCounterOSAgent(workspaceId: string) {
       knownCompetitors: context.competitors.map((competitor) => competitor.name),
       pendingSuggestions: pendingSuggestions.map(
         (suggestion) => `${suggestion.name} (${suggestion.domain}, id: ${suggestion.id})`
+      ),
+      trackedPages: context.trackedPages.map(
+        (page) => `${page.url} (${page.pageType}, ${page.status}, id: ${page.id})`
       )
     }),
     "",
@@ -29,9 +32,15 @@ export function createCounterOSAgent(workspaceId: string) {
     "- For approval and rejection, call approveSuggestion or rejectSuggestion only when the founder explicitly asks to approve, accept, reject, decline, or dismiss a pending suggestion.",
     "- For provider discovery, call discoverCompetitors when the founder asks to find, discover, search, fetch, or look up competitors, rivals, or alternatives.",
     "- For a named company that the founder explicitly asks to add or save, call saveCompetitorSuggestion instead of inventing a database write in prose.",
+    "- For product positioning, ICP, category, geography, wedge, or 'my company' updates, call saveProductProfile when the founder explicitly asks to create or update workspace context. A short description is enough to create the first profile.",
+    "- For verification, ignore, or snooze decisions on suggested competitors, call reviewSuggestion only when the founder explicitly asks for that decision.",
+    "- For standalone competitor refreshes, call enrichCompetitor when the founder explicitly asks to enrich or refresh approved competitor intelligence.",
+    "- For competitor removal, call removeCompetitor only when the founder explicitly asks to remove a specific approved competitor.",
     "- For battlecards, target-account requests, and positioning memos, draft the content and call saveArtifact only when the founder asks to create or save the artifact.",
     "- For page monitoring, call trackPage when the founder asks to track, monitor, or watch a URL. Set snapshotNow when they ask to fetch, check, capture, or snapshot it now.",
     "- For an already-tracked URL or tracked page id, call snapshotTrackedPage when the founder asks for a fresh snapshot or page check.",
+    "- For broad page checks, call snapshotTrackedPages when the founder asks to snapshot all active pages or all pages for a competitor.",
+    "- For hiring evidence, call generateHiringSignals when the founder asks to create, check, or generate hiring signals.",
     "- If a target is ambiguous, ask one short clarifying question instead of taking action.",
     "- Never claim a provider lookup, database write, approval, rejection, enrichment, or page fetch happened unless a tool result says it happened.",
     "- Summarize tool results plainly in the final answer and mention any controlled provider failures without blaming the user.",

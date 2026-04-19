@@ -1,5 +1,3 @@
-import "server-only";
-
 export type PageFetchResult = {
   url: string;
   title: string | null;

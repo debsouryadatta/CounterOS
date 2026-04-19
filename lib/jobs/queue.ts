@@ -1,5 +1,3 @@
-import "server-only";
-
 import { Queue, type JobsOptions } from "bullmq";
 import IORedis from "ioredis";
 import { createJobIdempotencyKey } from "./idempotency";
@@ -22,6 +20,7 @@ export function getRedisConnection() {
   }
 
   redisConnection = new IORedis(redisUrl, {
+    lazyConnect: true,
     maxRetriesPerRequest: null
   });
 

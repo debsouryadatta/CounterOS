@@ -18,7 +18,6 @@ export const COMPANY_DISCOVERY_FIELDS = [
   "headcount.total",
   "funding.total_investment_usd",
   "funding.last_round_type",
-  "roles.growth_6m",
   "competitors.websites"
 ] as NonEmptyArray<string>;
 
@@ -31,8 +30,6 @@ export const COMPANY_ENRICH_FIELDS = [
   "headcount.total",
   "funding.total_investment_usd",
   "funding.last_round_type",
-  "roles.growth_6m",
-  "roles.distribution",
   "locations.hq_country",
   "competitors.websites",
   "news"
@@ -300,7 +297,7 @@ function formatFunding(company: CrustdataCompanyData) {
 }
 
 function formatHiring(company: CrustdataCompanyData) {
-  const growth = getNestedNumber(company, ["roles", "growth_6m"]);
+  const growth = getNestedNumber(company, ["hiring", "growth_6m"]);
   if (growth !== null) {
     return `Role growth over 6 months: ${growth}%`;
   }

@@ -155,6 +155,10 @@ export function getDefaultWorkspace(userId: string) {
     .get();
 }
 
+export function listWorkspaces() {
+  return db.select().from(workspaces).orderBy(asc(workspaces.createdAt)).all();
+}
+
 export function getDashboardData(userId: string): DashboardData {
   const workspace = getDefaultWorkspace(userId);
 
@@ -436,14 +440,42 @@ export function deleteCompetitor(workspaceId: string, competitorId: string) {
   const existing = getCompetitor(workspaceId, competitorId);
 
   if (!existing) {
-    return false;
+    return null;
   }
 
-  db.delete(competitors)
-    .where(and(eq(competitors.id, competitorId), eq(competitors.workspaceId, workspaceId)))
-    .run();
+  const now = new Date().toISOString();
+  let pausedTrackedPages = 0;
 
-  return true;
+  db.transaction((tx) => {
+    const paused = tx
+      .update(trackedPages)
+      .set({
+        competitorId: null,
+        status: "paused",
+        lastError: null,
+        updatedAt: now
+      })
+      .where(
+        and(
+          eq(trackedPages.competitorId, competitorId),
+          eq(trackedPages.workspaceId, workspaceId)
+        )
+      )
+      .run();
+
+    pausedTrackedPages = paused.changes;
+
+    tx.delete(competitors)
+      .where(
+        and(eq(competitors.id, competitorId), eq(competitors.workspaceId, workspaceId))
+      )
+      .run();
+  });
+
+  return {
+    competitor: existing,
+    pausedTrackedPages
+  };
 }
 
 export function listSuggestedCompetitors(workspaceId: string): SuggestedCompetitor[] {
@@ -698,7 +730,8 @@ export function getWorkspaceAgentContext(workspaceId: string) {
     competitors: listCompetitors(workspaceId),
     suggestedCompetitors: listSuggestedCompetitors(workspaceId),
     signals: listSignals(workspaceId),
-    artifacts: listArtifacts(workspaceId)
+    artifacts: listArtifacts(workspaceId),
+    trackedPages: listTrackedPages(workspaceId)
   };
 }
 
@@ -1100,6 +1133,23 @@ export function appendChatTurn(input: {
       steps: input.agentSteps
     }
   ];
+}
+
+export function clearWorkspaceChatMessages(workspaceId: string) {
+  const workspaceChats = db
+    .select()
+    .from(chats)
+    .where(eq(chats.workspaceId, workspaceId))
+    .all();
+
+  let deletedMessages = 0;
+
+  for (const chat of workspaceChats) {
+    const result = db.delete(messages).where(eq(messages.chatId, chat.id)).run();
+    deletedMessages += result.changes;
+  }
+
+  return { deletedMessages };
 }
 
 function createChat(workspaceId: string) {

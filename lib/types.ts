@@ -150,9 +150,11 @@ export type AgentToolOutput = {
   ok: boolean;
   summary: string;
   code?: string;
+  productProfile?: ProductProfile | null;
   suggestedCompetitors?: SuggestedCompetitor[];
   suggestionUpdates?: SuggestedCompetitor[];
   approvedCompetitors?: CompetitorProfile[];
+  removedCompetitorIds?: string[];
   artifact?: Artifact | null;
   activities?: AgentActivity[];
   trackedPages?: TrackedPage[];

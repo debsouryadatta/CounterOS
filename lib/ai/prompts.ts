@@ -13,6 +13,7 @@ export type CounterOSAgentPromptContext = {
   geography?: string;
   knownCompetitors?: readonly string[];
   pendingSuggestions?: readonly string[];
+  trackedPages?: readonly string[];
 };
 
 export const counterosAgentSystemContract = [
@@ -34,7 +35,8 @@ export function buildCounterOSAgentSystemPrompt(
     formatContextLine("Category", context.category),
     formatContextLine("Geography", context.geography),
     formatContextLine("Known competitors", context.knownCompetitors?.join(", ")),
-    formatContextLine("Pending suggestions", context.pendingSuggestions?.join(", "))
+    formatContextLine("Pending suggestions", context.pendingSuggestions?.join(", ")),
+    formatContextLine("Tracked pages", context.trackedPages?.join(", "))
   ].filter(Boolean);
 
   const outputLines = listStructuredOutputContracts().map(

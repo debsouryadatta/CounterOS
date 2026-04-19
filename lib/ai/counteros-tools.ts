@@ -9,29 +9,42 @@ import {
   normalizeDomain as normalizeCrustdataDomain,
   resolveCompanyIdentity
 } from "@/lib/crustdata/intelligence";
+import { searchJobs } from "@/lib/crustdata/jobs";
 import {
   createArtifact,
+  createProductProfile,
+  createSignal,
   createSuggestedCompetitor,
   createTrackedPage,
   decideSuggestedCompetitor,
+  deleteCompetitor,
+  getProductProfile,
   getTrackedPage,
   getTrackedPageByUrl,
   getWorkspaceAgentContext,
+  listCompetitors,
+  listTrackedPages,
   recordAgentActivity,
+  updateProductProfile,
   updateCompetitor
 } from "@/lib/db/queries";
 import { snapshotTrackedPage } from "@/lib/pages/snapshot";
+import { detectJobSignalRules } from "@/lib/signals/rules";
+import { scoreSignal } from "@/lib/signals/scoring";
+import type { JobPostingSignalInput } from "@/lib/signals/types";
 import type {
   AgentActivity,
   AgentToolOutput,
   CompetitorProfile,
   PageSnapshot,
+  ProductProfile,
   Signal,
   SuggestedCompetitor,
   TrackedPage
 } from "@/lib/types";
 import { normalizeDomain } from "@/lib/validation/competitors";
 import { pageTypeSchema } from "@/lib/validation/pages";
+import { productProfilePatchSchema, type ProductProfilePatchInput } from "@/lib/validation/product";
 
 const threatTypeSchema = z.enum([
   "Direct",
@@ -41,7 +54,18 @@ const threatTypeSchema = z.enum([
   "Enterprise"
 ]);
 const suggestionPrioritySchema = z.enum(["High", "Medium", "Low"]);
+const reviewDecisionSchema = z.enum(["verified", "ignored", "snoozed"]);
 const artifactTypeSchema = z.enum(["Battlecard", "Target accounts", "Positioning memo"]);
+const JOB_FIELDS = [
+  "crustdata_job_id",
+  "job_details.title",
+  "job_details.category",
+  "job_details.url",
+  "company.basic_info.name",
+  "company.basic_info.primary_domain",
+  "location.raw",
+  "metadata.date_added"
+] as [string, ...string[]];
 
 export function createCounterOSTools(workspaceId: string) {
   return {
@@ -83,6 +107,33 @@ export function createCounterOSTools(workspaceId: string) {
           reason: reason ?? "Rejected from agent chat."
         })
     }),
+    reviewSuggestion: tool({
+      title: "Review suggestion",
+      description:
+        "Mark pending competitor suggestions as verified, ignored, or snoozed only when the founder explicitly asks for that review decision.",
+      inputSchema: z.object({
+        target: z
+          .string()
+          .min(1)
+          .describe("Suggestion id, company name, domain, or 'all' for every pending suggestion."),
+        decision: reviewDecisionSchema,
+        reason: z.string().min(1).optional().describe("Short founder-facing reason for the decision.")
+      }),
+      execute: async ({ target, decision, reason }) =>
+        decideSuggestionsFromTool({
+          workspaceId,
+          target,
+          decision,
+          reason: reason ?? `Marked ${decision} from agent chat.`
+        })
+    }),
+    saveProductProfile: tool({
+      title: "Save product profile",
+      description:
+        "Create or update product context, ICP, category, geography, and wedge when the founder explicitly provides workspace context.",
+      inputSchema: productProfilePatchSchema,
+      execute: async (input) => saveProductProfileFromTool(workspaceId, input)
+    }),
     discoverCompetitors: tool({
       title: "Discover competitors",
       description:
@@ -114,6 +165,28 @@ export function createCounterOSTools(workspaceId: string) {
         evidence: z.array(z.string().min(1)).max(8).default([])
       }),
       execute: async (input) => saveCompetitorSuggestionFromTool(workspaceId, input)
+    }),
+    enrichCompetitor: tool({
+      title: "Enrich competitor",
+      description:
+        "Refresh Crustdata intelligence for approved competitors when the founder explicitly asks to enrich or refresh them.",
+      inputSchema: z.object({
+        target: z
+          .string()
+          .min(1)
+          .describe("Approved competitor id, company name, domain, or 'all'.")
+      }),
+      execute: async ({ target }) => enrichCompetitorsFromTool(workspaceId, target)
+    }),
+    removeCompetitor: tool({
+      title: "Remove competitor",
+      description:
+        "Remove a specific approved competitor from tracking only when the founder explicitly asks. Linked tracked pages are paused.",
+      inputSchema: z.object({
+        target: z.string().min(1).describe("Approved competitor id, company name, or domain."),
+        reason: z.string().min(1).optional().describe("Short founder-facing reason for the removal.")
+      }),
+      execute: async ({ target, reason }) => removeCompetitorFromTool(workspaceId, target, reason)
     }),
     saveArtifact: tool({
       title: "Save artifact",
@@ -156,6 +229,34 @@ export function createCounterOSTools(workspaceId: string) {
           message: "Provide a trackedPageId or url."
         }),
       execute: async (input) => snapshotPageFromTool(workspaceId, input)
+    }),
+    snapshotTrackedPages: tool({
+      title: "Snapshot tracked pages",
+      description:
+        "Fetch and diff multiple tracked pages when the founder asks to snapshot all active pages or all pages for a competitor.",
+      inputSchema: z.object({
+        target: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Optional page id, tracked URL, competitor name/domain, page type, or 'all active'.")
+      }),
+      execute: async ({ target }) => snapshotTrackedPagesFromTool(workspaceId, target)
+    }),
+    generateHiringSignals: tool({
+      title: "Generate hiring signals",
+      description:
+        "Search provider job evidence and create hiring signals for approved competitors when the founder explicitly asks.",
+      inputSchema: z.object({
+        target: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Optional approved competitor id, company name, domain, or 'all'."),
+        limit: z.number().int().min(1).max(50).default(25)
+      }),
+      execute: async ({ target, limit }) =>
+        generateHiringSignalsFromTool(workspaceId, target, limit)
     })
   };
 }
@@ -165,14 +266,15 @@ export type CounterOSTools = ReturnType<typeof createCounterOSTools>;
 async function decideSuggestionsFromTool(input: {
   workspaceId: string;
   target: string;
-  decision: "approved" | "rejected";
+  decision: "approved" | "rejected" | "verified" | "ignored" | "snoozed";
   reason: string;
 }): Promise<AgentToolOutput> {
   const targets = resolveSuggestionTargets(input.workspaceId, input.target);
+  const label = labelForSuggestionDecision(input.decision);
 
   if (targets.length === 0) {
     const activity = recordToolActivity(input.workspaceId, {
-      label: input.decision === "approved" ? "Approve suggestion" : "Reject suggestion",
+      label,
       source: "SQLite",
       status: "Needs approval",
       evidence: `No pending suggestion matched "${input.target}".`
@@ -201,7 +303,7 @@ async function decideSuggestionsFromTool(input: {
     if (!result?.suggestion) {
       activities.push(
         recordToolActivity(input.workspaceId, {
-          label: input.decision === "approved" ? "Approve suggestion" : "Reject suggestion",
+          label,
           source: "SQLite",
           status: "Needs approval",
           evidence: `${suggestion.name} could not be updated.`
@@ -213,7 +315,7 @@ async function decideSuggestionsFromTool(input: {
     suggestionUpdates.push(result.suggestion);
     activities.push(
       recordToolActivity(input.workspaceId, {
-        label: input.decision === "approved" ? "Approve suggestion" : "Reject suggestion",
+        label,
         source: "SQLite",
         status: "Done",
         evidence: `${result.suggestion.name} was marked ${input.decision}.`
@@ -276,6 +378,207 @@ async function enrichApprovedCompetitor(
         enrichment.enrichmentError ??
         `${finalCompetitor.name} enrichment finished with ${finalCompetitor.intelligenceStatus}.`
     })
+  };
+}
+
+async function saveProductProfileFromTool(
+  workspaceId: string,
+  input: ProductProfilePatchInput
+): Promise<AgentToolOutput> {
+  const existing = getProductProfile(workspaceId);
+
+  if (!existing) {
+    if (!input.description?.trim()) {
+      const activity = recordToolActivity(workspaceId, {
+        label: "Save product profile",
+        source: "SQLite",
+        status: "Needs approval",
+        evidence: "Missing product profile description."
+      });
+
+      return {
+        ok: false,
+        code: "product_profile_incomplete",
+        summary: "I need a short description of what you are building before I can save your company profile.",
+        activities: [activity]
+      };
+    }
+
+    const productProfile = createProductProfile({
+      workspaceId,
+      profile: completeProductProfile(input)
+    });
+    const activity = recordToolActivity(workspaceId, {
+      label: "Save product profile",
+      source: "SQLite",
+      status: "Done",
+      evidence: `${productProfile.name} product context was created.`
+    });
+
+    return {
+      ok: true,
+      summary: `${productProfile.name} product context was saved.`,
+      productProfile,
+      activities: [activity]
+    };
+  }
+
+  const productProfile = updateProductProfile({ workspaceId, updates: input });
+  const activity = recordToolActivity(workspaceId, {
+    label: "Save product profile",
+    source: "SQLite",
+    status: productProfile ? "Done" : "Needs approval",
+    evidence: productProfile
+      ? `${productProfile.name} product context was updated.`
+      : "Product profile could not be updated."
+  });
+
+  return {
+    ok: Boolean(productProfile),
+    code: productProfile ? undefined : "product_profile_update_failed",
+    summary: productProfile
+      ? `${productProfile.name} product context was updated.`
+      : "Product profile could not be updated.",
+    productProfile,
+    activities: [activity]
+  };
+}
+
+function completeProductProfile(input: ProductProfilePatchInput): ProductProfile {
+  return {
+    name: input.name?.trim() || "My company",
+    description: input.description?.trim() || "Not specified yet.",
+    icp: input.icp?.trim() || "Not specified yet.",
+    category: input.category?.trim() || "Not specified yet.",
+    geography: input.geography?.trim() || "Not specified yet.",
+    wedge: input.wedge?.trim() || "Not specified yet."
+  };
+}
+
+async function enrichCompetitorsFromTool(
+  workspaceId: string,
+  target: string
+): Promise<AgentToolOutput> {
+  const targets = resolveCompetitorTargets(workspaceId, target, { allowAll: true });
+
+  if (targets.length === 0) {
+    const activity = recordToolActivity(workspaceId, {
+      label: "Enrich competitor",
+      source: "SQLite",
+      status: "Needs approval",
+      evidence: `No approved competitor matched "${target}".`
+    });
+
+    return {
+      ok: false,
+      code: "competitor_not_found",
+      summary: `No approved competitor matched "${target}".`,
+      activities: [activity]
+    };
+  }
+
+  const approvedCompetitors: CompetitorProfile[] = [];
+  const activities: AgentActivity[] = [];
+
+  for (const competitor of targets) {
+    const result = await enrichApprovedCompetitor(workspaceId, competitor);
+    approvedCompetitors.push(result.competitor);
+    activities.push(result.activity);
+  }
+
+  const failed = activities.filter((activity) => activity.status === "Needs approval").length;
+
+  return {
+    ok: approvedCompetitors.length > 0 && failed < approvedCompetitors.length,
+    code: failed > 0 ? "enrichment_partial_failure" : undefined,
+    summary:
+      failed > 0
+        ? `Enrichment finished for ${approvedCompetitors.length - failed} competitor${approvedCompetitors.length - failed === 1 ? "" : "s"}; ${failed} need review.`
+        : `Enrichment finished for ${approvedCompetitors.length} competitor${approvedCompetitors.length === 1 ? "" : "s"}.`,
+    approvedCompetitors,
+    activities
+  };
+}
+
+async function removeCompetitorFromTool(
+  workspaceId: string,
+  target: string,
+  reason?: string
+): Promise<AgentToolOutput> {
+  if (/\b(all|every|everything)\b/i.test(target)) {
+    const activity = recordToolActivity(workspaceId, {
+      label: "Remove competitor",
+      source: "SQLite",
+      status: "Needs approval",
+      evidence: "Bulk competitor removal is blocked from agent chat."
+    });
+
+    return {
+      ok: false,
+      code: "bulk_removal_blocked",
+      summary: "I can remove a specific competitor, but not all competitors at once.",
+      activities: [activity]
+    };
+  }
+
+  const targets = resolveCompetitorTargets(workspaceId, target, { allowAll: false });
+
+  if (targets.length === 0) {
+    const activity = recordToolActivity(workspaceId, {
+      label: "Remove competitor",
+      source: "SQLite",
+      status: "Needs approval",
+      evidence: `No approved competitor matched "${target}".`
+    });
+
+    return {
+      ok: false,
+      code: "competitor_not_found",
+      summary: `No approved competitor matched "${target}".`,
+      activities: [activity]
+    };
+  }
+
+  const removedCompetitorIds: string[] = [];
+  const activities: AgentActivity[] = [];
+  let pausedCount = 0;
+
+  for (const competitor of targets) {
+    const deleted = deleteCompetitor(workspaceId, competitor.id);
+
+    if (!deleted) {
+      activities.push(
+        recordToolActivity(workspaceId, {
+          label: "Remove competitor",
+          source: "SQLite",
+          status: "Needs approval",
+          evidence: `${competitor.name} could not be removed.`
+        })
+      );
+      continue;
+    }
+
+    removedCompetitorIds.push(competitor.id);
+    pausedCount += deleted.pausedTrackedPages;
+    activities.push(
+      recordToolActivity(workspaceId, {
+        label: "Remove competitor",
+        source: "SQLite",
+        status: "Done",
+        evidence: `${competitor.name} was removed${reason ? `: ${reason}` : "."}`
+      })
+    );
+  }
+
+  return {
+    ok: removedCompetitorIds.length > 0,
+    summary:
+      removedCompetitorIds.length > 0
+        ? `Removed ${removedCompetitorIds.length} competitor${removedCompetitorIds.length === 1 ? "" : "s"} and paused ${pausedCount} linked page${pausedCount === 1 ? "" : "s"}.`
+        : "No competitors were removed.",
+    removedCompetitorIds,
+    trackedPages: listTrackedPages(workspaceId),
+    activities
   };
 }
 
@@ -573,6 +876,209 @@ async function snapshotPageFromTool(
   };
 }
 
+async function snapshotTrackedPagesFromTool(
+  workspaceId: string,
+  target?: string
+): Promise<AgentToolOutput> {
+  const trackedPages = resolveTrackedPageTargets(workspaceId, target);
+
+  if (trackedPages.length === 0) {
+    const activity = recordToolActivity(workspaceId, {
+      label: "Snapshot tracked pages",
+      source: "Page fetcher",
+      status: "Needs approval",
+      evidence: target
+        ? `No tracked pages matched "${target}".`
+        : "No active tracked pages are available."
+    });
+
+    return {
+      ok: false,
+      code: "tracked_pages_not_found",
+      summary: target
+        ? `No tracked pages matched "${target}".`
+        : "No active tracked pages are available.",
+      activities: [activity]
+    };
+  }
+
+  const activities: AgentActivity[] = [];
+  const snapshots: PageSnapshot[] = [];
+  const signals: Signal[] = [];
+  let failures = 0;
+
+  for (const trackedPage of trackedPages) {
+    const snapshotResult = await snapshotTrackedPageSafely(workspaceId, trackedPage);
+    activities.push(snapshotResult.activity);
+
+    if (snapshotResult.snapshot) {
+      snapshots.push(snapshotResult.snapshot);
+    }
+
+    if (snapshotResult.signal) {
+      signals.push(snapshotResult.signal);
+    }
+
+    if (!snapshotResult.ok) {
+      failures += 1;
+    }
+  }
+
+  return {
+    ok: failures < trackedPages.length,
+    code: failures > 0 ? "snapshot_partial_failure" : undefined,
+    summary: `Snapshotted ${snapshots.length} page${snapshots.length === 1 ? "" : "s"}; created ${signals.length} signal${signals.length === 1 ? "" : "s"}${failures > 0 ? `; ${failures} failed` : ""}.`,
+    trackedPages: listTrackedPages(workspaceId),
+    snapshots,
+    signals,
+    activities
+  };
+}
+
+async function generateHiringSignalsFromTool(
+  workspaceId: string,
+  target: string | undefined,
+  limit: number
+): Promise<AgentToolOutput> {
+  if (!process.env.CRUSTDATA_API_KEY) {
+    const activity = recordToolActivity(workspaceId, {
+      label: "Generate hiring signals",
+      source: "Crustdata",
+      status: "Needs approval",
+      evidence: "CRUSTDATA_API_KEY is not configured, so hiring signal generation could not run."
+    });
+
+    return {
+      ok: false,
+      code: "provider_key_missing",
+      summary: "Hiring signals could not be generated because CRUSTDATA_API_KEY is missing.",
+      activities: [activity]
+    };
+  }
+
+  const competitors = resolveCompetitorTargets(workspaceId, target ?? "all", {
+    allowAll: true
+  });
+
+  if (competitors.length === 0) {
+    const activity = recordToolActivity(workspaceId, {
+      label: "Generate hiring signals",
+      source: "SQLite",
+      status: "Needs approval",
+      evidence: target
+        ? `No approved competitor matched "${target}".`
+        : "No approved competitors are available."
+    });
+
+    return {
+      ok: false,
+      code: "competitor_not_found",
+      summary: target
+        ? `No approved competitor matched "${target}".`
+        : "Approve at least one competitor before generating hiring signals.",
+      activities: [activity]
+    };
+  }
+
+  const signals: Signal[] = [];
+  const activities: AgentActivity[] = [];
+  let failures = 0;
+
+  for (const competitor of competitors) {
+    try {
+      const response = await searchJobs(
+        {
+          fields: JOB_FIELDS,
+          filters: buildJobsFilter(competitor),
+          sorts: [{ column: "metadata.date_added", order: "desc" }],
+          limit
+        },
+        {
+          cache: {
+            workspaceId,
+            ttlMs: 6 * 60 * 60 * 1000
+          }
+        }
+      );
+      const jobs = response.results.map(mapCrustdataJob);
+      const ruleMatches = detectJobSignalRules({
+        competitorName: competitor.name,
+        currentJobs: jobs,
+        baselineJobCount: 0,
+        knownGeographies: []
+      });
+      const createdForCompetitor: Signal[] = [];
+
+      for (const match of ruleMatches) {
+        const scored = scoreSignal({
+          freshness: 90,
+          confidence: match.confidence,
+          competitorPriority: competitor.trackingPriority,
+          customerImpact: match.customerImpact,
+          actionability: match.actionability,
+          evidenceCount: match.evidence.length
+        });
+        createdForCompetitor.push(
+          createSignal({
+            workspaceId,
+            competitor: competitor.name,
+            title: match.title,
+            summary: match.summary,
+            impactScore: scored.impactScore,
+            priority: scored.priority,
+            evidence: match.evidence.map((evidence) => ({
+              source: evidence.source,
+              detail: evidence.detail,
+              freshness: evidence.observedAt ?? "Recent",
+              url: evidence.url
+            })),
+            meaning:
+              "Crustdata job evidence suggests this competitor may be changing focus, capacity, or go-to-market motion.",
+            recommendedMove:
+              "Review the evidence, compare it with positioning or pricing changes, and decide whether to create a counter-move.",
+            counterMoves: {
+              defensive:
+                "Prepare messaging that protects your current wedge against the competitor's apparent hiring direction.",
+              offensive:
+                "Look for accounts that may not fit the competitor's new hiring focus and target them early.",
+              ignore:
+                "Ignore if the hiring pattern does not overlap your ICP or has low evidence confidence."
+            }
+          })
+        );
+      }
+
+      signals.push(...createdForCompetitor);
+      activities.push(
+        recordToolActivity(workspaceId, {
+          label: "Generate hiring signals",
+          source: "Crustdata",
+          status: "Done",
+          evidence: `${competitor.name}: checked ${jobs.length} jobs and created ${createdForCompetitor.length} signal${createdForCompetitor.length === 1 ? "" : "s"}.`
+        })
+      );
+    } catch (error) {
+      failures += 1;
+      activities.push(
+        recordToolActivity(workspaceId, {
+          label: "Generate hiring signals",
+          source: "Crustdata",
+          status: "Needs approval",
+          evidence: `${competitor.name}: ${formatProviderError(error)}`
+        })
+      );
+    }
+  }
+
+  return {
+    ok: failures < competitors.length,
+    code: failures > 0 ? "hiring_signals_partial_failure" : undefined,
+    summary: `Created ${signals.length} hiring signal${signals.length === 1 ? "" : "s"} from ${competitors.length - failures} competitor${competitors.length - failures === 1 ? "" : "s"}${failures > 0 ? `; ${failures} failed` : ""}.`,
+    signals,
+    activities
+  };
+}
+
 async function snapshotTrackedPageSafely(workspaceId: string, trackedPage: TrackedPage) {
   try {
     const { snapshot, signal } = await snapshotTrackedPage({
@@ -707,6 +1213,136 @@ function inferCompetitorIdForUrl(workspaceId: string, url: string, target?: stri
   });
 
   return competitor?.id ?? null;
+}
+
+function resolveCompetitorTargets(
+  workspaceId: string,
+  target: string,
+  options: { allowAll: boolean }
+) {
+  const competitors = listCompetitors(workspaceId);
+  const normalizedTarget = normalizeForMatch(target);
+
+  if (/\b(all|every|everything|approved)\b/.test(normalizedTarget)) {
+    return options.allowAll ? competitors : [];
+  }
+
+  return competitors.filter((competitor) => {
+    const name = normalizeForMatch(competitor.name);
+    const domain = normalizeForMatch(competitor.domain);
+    const domainRoot = normalizeForMatch(competitor.domain.split(".")[0] ?? "");
+
+    return (
+      competitor.id === target ||
+      (name.length > 2 && normalizedTarget.includes(name)) ||
+      (domain.length > 2 && normalizedTarget.includes(domain)) ||
+      (domainRoot.length > 2 && normalizedTarget.includes(domainRoot))
+    );
+  });
+}
+
+function resolveTrackedPageTargets(workspaceId: string, target?: string) {
+  const pages = listTrackedPages(workspaceId);
+
+  if (!target || /\b(all|every|everything|active)\b/i.test(target)) {
+    return pages.filter((page) => page.status !== "paused");
+  }
+
+  const clean = cleanUrl(target);
+  const normalizedTarget = normalizeForMatch(target);
+  const competitors = listCompetitors(workspaceId).filter((competitor) => {
+    const name = normalizeForMatch(competitor.name);
+    const domain = normalizeForMatch(competitor.domain);
+    const domainRoot = normalizeForMatch(competitor.domain.split(".")[0] ?? "");
+
+    return (
+      (name.length > 2 && normalizedTarget.includes(name)) ||
+      (domain.length > 2 && normalizedTarget.includes(domain)) ||
+      (domainRoot.length > 2 && normalizedTarget.includes(domainRoot))
+    );
+  });
+  const competitorIds = new Set(competitors.map((competitor) => competitor.id));
+
+  return pages.filter((page) => {
+    const normalizedUrl = normalizeForMatch(page.url);
+
+    return (
+      page.id === target ||
+      (clean && page.url === clean) ||
+      (normalizedTarget.length > 2 && normalizedUrl.includes(normalizedTarget)) ||
+      (normalizedTarget.length > 2 && page.pageType === normalizedTarget) ||
+      (page.competitorId ? competitorIds.has(page.competitorId) : false)
+    );
+  });
+}
+
+function buildJobsFilter(competitor: CompetitorProfile) {
+  const conditions = competitor.crustdataCompanyId
+    ? [
+        {
+          field: "company.basic_info.company_id",
+          type: "=",
+          value: numericOrString(competitor.crustdataCompanyId)
+        }
+      ]
+    : [
+        {
+          field: "company.basic_info.primary_domain",
+          type: "=",
+          value: competitor.domain
+        }
+      ];
+
+  return {
+    op: "and" as const,
+    conditions
+  };
+}
+
+function mapCrustdataJob(job: Record<string, unknown>): JobPostingSignalInput {
+  return {
+    id: readString(job.crustdata_job_id ?? job.id),
+    title: readString(readPath(job, "job_details.title") ?? job.title) ?? "Untitled role",
+    companyName: readString(readPath(job, "company.basic_info.name") ?? job.company_name),
+    location: readString(readPath(job, "location.raw") ?? job.location),
+    department: readString(readPath(job, "job_details.category") ?? job.department),
+    postedAt: readString(readPath(job, "metadata.date_added") ?? job.date_posted),
+    url: readString(readPath(job, "job_details.url") ?? job.url)
+  };
+}
+
+function readPath(value: Record<string, unknown>, path: string) {
+  return path.split(".").reduce<unknown>((current, key) => {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+
+    return (current as Record<string, unknown>)[key];
+  }, value);
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numericOrString(value: string) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : value;
+}
+
+function labelForSuggestionDecision(
+  decision: "approved" | "rejected" | "verified" | "ignored" | "snoozed"
+) {
+  const labels = {
+    approved: "Approve suggestion",
+    rejected: "Reject suggestion",
+    verified: "Verify suggestion",
+    ignored: "Ignore suggestion",
+    snoozed: "Snooze suggestion"
+  } satisfies Record<typeof decision, string>;
+
+  return labels[decision];
 }
 
 function recordToolActivity(
