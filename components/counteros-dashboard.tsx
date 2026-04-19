@@ -251,16 +251,16 @@ function outputBadges(output: AgentToolOutput) {
   ].filter(Boolean);
 }
 
-function isVisibleMessagePart(part: UIMessage["parts"][number], showStepStart: boolean) {
+function isRenderableMessagePart(part: UIMessage["parts"][number]) {
   if (part.type === "text") {
     return part.text.trim().length > 0;
   }
 
-  if (part.type === "step-start") {
-    return showStepStart;
-  }
-
   return Boolean(asToolPart(part));
+}
+
+function hasRenderablePartsAfter(parts: UIMessage["parts"], index: number) {
+  return parts.slice(index + 1).some(isRenderableMessagePart);
 }
 
 export function CounterOSDashboard({
@@ -1603,9 +1603,9 @@ function AgentView({
                   detail="Ask the agent to find competitors, explain signals, or draft artifacts."
                 />
               )}
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <AgentChatMessage
-                  key={message.id}
+                  key={`${message.role}-${index}`}
                   message={message}
                   isActive={isBusy && message.id === lastAssistantMessageId}
                 />
@@ -1707,12 +1707,11 @@ function AgentChatMessage({
   isActive: boolean;
 }) {
   const isUser = message.role === "user";
-  const lastPartIndex = message.parts.length - 1;
-  const hasVisibleContent = message.parts.some((part, index) =>
-    isVisibleMessagePart(part, isActive && index === lastPartIndex)
-  );
+  const lastStepStartIndex = message.parts.findLastIndex((part) => part.type === "step-start");
+  const hasRenderedParts =
+    message.parts.some(isRenderableMessagePart) || (isActive && lastStepStartIndex >= 0);
 
-  if (!hasVisibleContent) {
+  if (!hasRenderedParts && !isActive) {
     return null;
   }
 
@@ -1732,14 +1731,22 @@ function AgentChatMessage({
         {isUser ? "You" : "CounterOS"}
       </span>
       <div className="grid gap-3">
-        {message.parts.map((part, index) => (
-          <AgentMessagePart
-            key={`${message.id}-${index}`}
-            part={part}
-            isUser={isUser}
-            showStepStart={isActive && index === lastPartIndex}
-          />
-        ))}
+        {message.parts.map((part, index) => {
+          const showStepStart =
+            isActive &&
+            index === lastStepStartIndex &&
+            !hasRenderablePartsAfter(message.parts, index);
+
+          return (
+            <AgentMessagePart
+              key={index}
+              part={part}
+              isUser={isUser}
+              showStepStart={showStepStart}
+            />
+          );
+        })}
+        {!hasRenderedParts && isActive && <AgentInlinePending />}
       </div>
     </div>
   );
@@ -1892,6 +1899,25 @@ function AgentPendingMessage() {
             Reading the message and preparing the workspace tools.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentInlinePending() {
+  return (
+    <div className="grid grid-cols-[28px_minmax(0,1fr)] gap-3 rounded-lg border bg-background/80 px-3 py-2">
+      <div className="grid size-7 place-items-center rounded-full border bg-card">
+        <Loader2 className="size-3.5 animate-spin text-primary" aria-hidden="true" />
+      </div>
+      <div className="min-w-0">
+        <div className="flex items-start justify-between gap-3">
+          <strong className="text-sm font-semibold">Preparing response</strong>
+          <StatusBadge tone="info" label="Running" />
+        </div>
+        <p className="m-0 mt-1 text-sm leading-6 text-muted-foreground">
+          Keeping the response open while the next streamed part arrives.
+        </p>
       </div>
     </div>
   );
