@@ -10,7 +10,7 @@ export async function fetchPageText(url: string): Promise<PageFetchResult> {
   const response = await fetch(url, {
     headers: {
       accept: "text/html, text/plain;q=0.9, */*;q=0.5",
-      "user-agent": "CounterlessBot/0.1 (+https://counterless.local)"
+      "user-agent": "CounterOSBot/0.1 (+https://counteros.local)"
     },
     cache: "no-store",
     signal: AbortSignal.timeout(12_000)

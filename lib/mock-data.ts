@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 export const productProfile: ProductProfile = {
-  name: "Counterless demo workspace",
+  name: "CounterOS demo workspace",
   description: "AI receptionist and front-desk automation for dental clinics.",
   icp: "Independent and small-group dental clinics with 3-20 staff members.",
   category: "Healthcare operations automation",
@@ -207,7 +207,7 @@ export const signals: Signal[] = [
       "Verify with pricing/page changes and customer segment messaging before changing roadmap priorities.",
     counterMoves: {
       defensive:
-        "Document why Counterless-style buyers value lightweight setup.",
+        "Document why CounterOS-style buyers value lightweight setup.",
       offensive:
         "Use implementation-heavy language against them in SMB sales conversations.",
       ignore:
@@ -226,7 +226,7 @@ export const artifacts: Artifact[] = [
     bullets: [
       "Lead with fast setup and fewer workflow changes.",
       "Ask whether the clinic needs enterprise onboarding or just better call handling.",
-      "Position Counterless around lower complexity for small teams.",
+      "Position CounterOS around lower complexity for small teams.",
       "Offer a 14-day pilot with appointment-booking success criteria."
     ]
   },

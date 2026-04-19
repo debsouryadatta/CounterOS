@@ -1,8 +1,8 @@
-# Crustdata Docs Index For Counterless
+# Crustdata Docs Index For CounterOS
 
 Prepared: April 19, 2026
 
-This file maps the Crustdata docs to the Counterless implementation. It exists so a future chat/thread can quickly find the right page for a specific integration task.
+This file maps the Crustdata docs to the CounterOS implementation. It exists so a future chat/thread can quickly find the right page for a specific integration task.
 
 ## Global Integration Rules
 
@@ -20,7 +20,7 @@ content-type: application/json
 x-api-version: 2025-11-01
 ```
 
-Counterless rules:
+CounterOS rules:
 
 - Keep `CRUSTDATA_API_KEY` server-side only.
 - Centralize all Crustdata calls in one server-side client.
@@ -45,7 +45,7 @@ Important footguns:
 
 ## Which Doc To Use For What
 
-| Need | Use This Doc | URL | Counterless Use |
+| Need | Use This Doc | URL | CounterOS Use |
 |---|---|---|---|
 | Understand the public API areas | Introduction | https://docs.crustdata.com/general/introduction | High-level map of Company, Person, and Web APIs. Use when onboarding a future developer. |
 | Company API overview | Company quickstart | https://docs.crustdata.com/company-docs/quickstart | Learn the four company endpoints and common flow: Autocomplete -> Search -> Enrich, or Identify -> Search. |
@@ -66,7 +66,7 @@ Important footguns:
 
 ## Endpoint Summary
 
-| Area | Endpoint | Purpose | Credit Notes | Counterless Phase |
+| Area | Endpoint | Purpose | Credit Notes | CounterOS Phase |
 |---|---|---|---|---|
 | Company | `POST /company/search` | Search companies using structured filters, fields, sorts, limits, and cursor pagination. | 0.03 credits per result returned. | Phase 4 |
 | Company | `POST /company/search/autocomplete` | Discover valid values for Company Search filters. | Free. | Phase 4 |
@@ -96,7 +96,7 @@ Use for:
 - Shared auth/header rules.
 - Common footguns like ISO3 countries and `=>` / `=<` operators.
 
-Counterless mapping:
+CounterOS mapping:
 
 - Read before building the Phase 4 Crustdata client.
 - Use the workflow guidance to order discovery:
@@ -151,7 +151,7 @@ Response shape:
 { companies, next_cursor, total_count }
 ```
 
-Important fields for Counterless:
+Important fields for CounterOS:
 
 - `crustdata_company_id`
 - `basic_info.name`
@@ -314,7 +314,7 @@ POST /company/search/autocomplete
 
 Use for:
 
-- Filter dropdowns and typeahead in the Counterless discovery UI.
+- Filter dropdowns and typeahead in the CounterOS discovery UI.
 - Exact industry, country, company type, funding stage, and company-name values before Search.
 
 Request example:
@@ -357,7 +357,7 @@ Use for:
 - Error handling and retry decision table.
 - Stable pagination examples.
 
-Counterless mapping:
+CounterOS mapping:
 
 - Use these examples when implementing competitor auto-finder and similar-company discovery.
 - Use the error handling table when building the Crustdata client.
@@ -374,7 +374,7 @@ Use for:
 - Difference between Search, Enrich, and Autocomplete.
 - Access boundary for live endpoints.
 
-Counterless mapping:
+CounterOS mapping:
 
 - Use before Phase 6 people movement implementation.
 - The normal first workflow is Person Search -> Person Enrich only for people who matter.
@@ -587,7 +587,7 @@ Use for:
 - Business email -> Enrich workflow.
 - Error handling and retry decision table.
 
-Counterless mapping:
+CounterOS mapping:
 
 - Use this for the Phase 6 leadership/people movement implementation.
 - Follow the pattern of searching first, extracting profile URLs, and enriching only top matches.
@@ -611,7 +611,7 @@ Important model:
 - `company.basic_info.company_id` is the filter alias for that same company ID in `/job/search`.
 - `metadata.date_added` is when Crustdata first indexed the listing, not necessarily when the employer posted it.
 
-Counterless mapping:
+CounterOS mapping:
 
 - Use Jobs Search for hiring signals without enriching every company result.
 
@@ -729,7 +729,7 @@ Current public guidance:
 - Add circuit breakers around non-critical enrichment.
 - Cache stable results.
 
-Counterless mapping:
+CounterOS mapping:
 
 - Phase 4 can start with conservative direct calls.
 - Phase 8 should centralize rate limits in queue workers before scheduled polling.
@@ -756,7 +756,7 @@ Current public pricing summary:
 - `/web/search/live`: 1 credit per query.
 - `/web/enrich/live`: 1 credit per page.
 
-Counterless cost strategy:
+CounterOS cost strategy:
 
 - Use Autocomplete freely for UI filter values.
 - Use Identify freely for user-entered competitor resolution.
@@ -775,13 +775,13 @@ The Introduction and Pricing docs mention Web APIs:
 
 Pricing says both are available on self-serve plans. However, the public Web quickstart link redirected to login during review, so the detailed Web docs may require dashboard access.
 
-Counterless mapping:
+CounterOS mapping:
 
 - Do not block Phase 1-6 on Web APIs.
 - In Phase 7, use the dashboard/API reference to confirm request/response shape before coding.
 - Web APIs are likely useful for homepage/pricing-page evidence, public page fetches, and AI/search visibility workflows.
 
-## Recommended Counterless Crustdata Call Order
+## Recommended CounterOS Crustdata Call Order
 
 ### Competitor Added Manually
 
@@ -836,7 +836,7 @@ Founder chooses opportunity or counter-move
 
 ## Error Handling Cheatsheet
 
-| Status/Case | Meaning | Counterless Behavior |
+| Status/Case | Meaning | CounterOS Behavior |
 |---|---|---|
 | `200` with empty list | No match or no results | Show no-match state; do not retry automatically. |
 | `400` | Invalid field/operator/body | Log request, show developer/admin error, fix code/query. Do not retry. |

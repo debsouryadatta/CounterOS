@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { CounterlessDashboard } from "@/components/counterless-dashboard";
+import { CounterOSDashboard } from "@/components/counteros-dashboard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/db/queries";
 
@@ -14,5 +14,5 @@ export default async function Home() {
 
   const dashboardData = getDashboardData(user.id);
 
-  return <CounterlessDashboard initialData={dashboardData} user={user} />;
+  return <CounterOSDashboard initialData={dashboardData} user={user} />;
 }

@@ -1,19 +1,19 @@
-# Counterless Core Solution Plan
+# CounterOS Core Solution Plan
 
 ## Product Name
 
-The product name is **Counterless**.
+The product name is **CounterOS**.
 
 Use this name consistently in the UI, docs, code comments, seed data, and demo copy. The product should feel like a focused agent for competitive counter-moves, not a broad market research dashboard.
 
 ## Product Idea
 
-Counterless is an AI competitor intelligence agent for founders and small teams.
+CounterOS is an AI competitor intelligence agent for founders and small teams.
 
 In simple words:
 
 ```text
-Counterless watches competitors, explains what changed, and tells the founder what to do next.
+CounterOS watches competitors, explains what changed, and tells the founder what to do next.
 ```
 
 The main value is not only collecting competitor data. The main value is turning that data into a clear action.
@@ -206,10 +206,10 @@ For the first implementation, the MVP should focus on one memorable workflow:
 
 ```text
 A founder describes a company or product idea.
-Counterless suggests competitors.
+CounterOS suggests competitors.
 The founder approves the right ones.
-Counterless shows one important competitor signal with evidence.
-Counterless explains the meaning and creates the recommended counter-move.
+CounterOS shows one important competitor signal with evidence.
+CounterOS explains the meaning and creates the recommended counter-move.
 ```
 
 Keep these in the first build:
@@ -285,8 +285,8 @@ CRUSTDATA_API_KEY=...
 Recommended for deployed environments:
 
 ```env
-AUTH_URL=https://your-counterless-domain.com
-NEXT_PUBLIC_APP_URL=https://your-counterless-domain.com
+AUTH_URL=https://your-counteros-domain.com
+NEXT_PUBLIC_APP_URL=https://your-counteros-domain.com
 ```
 
 Optional for demo seeding:
@@ -338,11 +338,11 @@ What should we do now?
 The final product name is:
 
 ```text
-Counterless
+CounterOS
 ```
 
 Working tagline:
 
 ```text
-Most tools tell you what changed. Counterless tells you what changed, why it matters, and what counter-move to make next.
+Most tools tell you what changed. CounterOS tells you what changed, why it matters, and what counter-move to make next.
 ```

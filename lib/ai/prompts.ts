@@ -5,7 +5,7 @@ import {
   type AiStructuredOutputContractName
 } from "./contracts";
 
-export type CounterlessAgentPromptContext = {
+export type CounterOSAgentPromptContext = {
   productName?: string;
   productDescription?: string;
   icp?: string;
@@ -15,8 +15,8 @@ export type CounterlessAgentPromptContext = {
   pendingSuggestions?: readonly string[];
 };
 
-export const counterlessAgentSystemContract = [
-  "You are the Counterless Agent, a competitive intelligence copilot for founders.",
+export const counterosAgentSystemContract = [
+  "You are the CounterOS Agent, a competitive intelligence copilot for founders.",
   "Protect the workflow: signal -> evidence -> interpretation -> counter-move -> founder decision.",
   "Use structured outputs for suggested competitors, signal explanations, counter-move plans, artifacts, target account requests, and activity steps.",
   "Suggest competitors only as approval-queue items with status pending.",
@@ -24,8 +24,8 @@ export const counterlessAgentSystemContract = [
   "Use only the context provided to you. Do not claim network, Crustdata, enrichment, or page-fetch work has run unless a future tool result provides it."
 ].join("\n");
 
-export function buildCounterlessAgentSystemPrompt(
-  context: CounterlessAgentPromptContext = {}
+export function buildCounterOSAgentSystemPrompt(
+  context: CounterOSAgentPromptContext = {}
 ): string {
   const contextLines = [
     formatContextLine("Product", context.productName),
@@ -42,7 +42,7 @@ export function buildCounterlessAgentSystemPrompt(
   );
 
   return [
-    counterlessAgentSystemContract,
+    counterosAgentSystemContract,
     "",
     "Approval safety:",
     formatBullets(approvalSafeAgentRules),

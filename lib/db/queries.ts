@@ -985,7 +985,7 @@ function createChat(workspaceId: string) {
   const chat = {
     id: randomUUID(),
     workspaceId,
-    title: "Counterless agent chat"
+    title: "CounterOS agent chat"
   };
   db.insert(chats).values(chat).run();
   return chat;

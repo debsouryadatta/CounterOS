@@ -40,7 +40,7 @@ export async function createOpenAITextResponse(input: CreateOpenAIResponseInput)
       "content-type": "application/json"
     },
     body: JSON.stringify({
-      model: input.model ?? process.env.COUNTERLESS_OPENAI_MODEL ?? "gpt-5.4-mini",
+      model: input.model ?? process.env.COUNTEROS_OPENAI_MODEL ?? "gpt-5.4-mini",
       input: input.input,
       max_output_tokens: input.maxOutputTokens ?? 1400
     }),

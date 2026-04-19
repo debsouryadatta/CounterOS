@@ -25,7 +25,7 @@ const views: Array<{ id: View; label: string; icon: IconName }> = [
   { id: "agent", label: "Agent Chat", icon: "chat" }
 ];
 
-export function CounterlessDashboard({
+export function CounterOSDashboard({
   initialData,
   user
 }: {
@@ -257,7 +257,7 @@ export function CounterlessDashboard({
           </div>
           <div>
             <p className="eyebrow">Competitor intelligence agent</p>
-            <h1>Counterless</h1>
+            <h1>CounterOS</h1>
           </div>
         </div>
 
@@ -279,7 +279,7 @@ export function CounterlessDashboard({
       {notice && <div className="notice-bar">{notice}</div>}
 
       <div className="workspace-shell">
-        <aside className="sidebar" aria-label="Counterless views">
+        <aside className="sidebar" aria-label="CounterOS views">
           <nav className="nav-list">
             {views.map((view) => (
               <button
@@ -392,7 +392,7 @@ function OverviewView({
           <p className="section-kicker">Founder briefing</p>
           <h2 id="overview-title">One signal needs a counter-move this week.</h2>
           <p>
-            {selectedSignal.competitor} appears to be moving upmarket. Counterless
+            {selectedSignal.competitor} appears to be moving upmarket. CounterOS
             recommends defending the small-clinic wedge before sales conversations
             drift toward enterprise comparisons.
           </p>
@@ -683,21 +683,21 @@ function AgentView({
           <div className="chat-messages" aria-live="polite">
             {messages.map((message) => (
               <div key={message.id} className={`chat-bubble ${message.role}`}>
-                <span>{message.role === "agent" ? "Counterless" : "You"}</span>
+                <span>{message.role === "agent" ? "CounterOS" : "You"}</span>
                 <p>{message.text}</p>
               </div>
             ))}
           </div>
           <form className="chat-form" onSubmit={sendMessage}>
             <label className="sr-only" htmlFor="chat-input">
-              Message Counterless
+              Message CounterOS
             </label>
             <input
               id="chat-input"
               type="text"
               value={chatInput}
               onChange={(event) => setChatInput(event.target.value)}
-              placeholder="Ask Counterless to find competitors or explain a signal"
+              placeholder="Ask CounterOS to find competitors or explain a signal"
             />
             <button className="primary-button" type="submit">
               <Icon name="send" />

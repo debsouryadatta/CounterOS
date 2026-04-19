@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Counterless",
+  title: "CounterOS",
   description: "Competitor intelligence agent for founders"
 };
 

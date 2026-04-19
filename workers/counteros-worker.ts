@@ -1,10 +1,10 @@
 import { Worker } from "bullmq";
-import { getRedisConnection, COUNTERLESS_QUEUE_NAME } from "@/lib/jobs/queue";
+import { getRedisConnection, COUNTEROS_QUEUE_NAME } from "@/lib/jobs/queue";
 import { parseJobPayload, type JobPayload } from "@/lib/jobs/payloads";
 import { observabilityLogger } from "@/lib/observability/logger";
 
 const worker = new Worker<JobPayload>(
-  COUNTERLESS_QUEUE_NAME,
+  COUNTEROS_QUEUE_NAME,
   async (job) => {
     const payload = parseJobPayload(job.data);
 
@@ -33,7 +33,7 @@ const worker = new Worker<JobPayload>(
   },
   {
     connection: getRedisConnection(),
-    concurrency: Number(process.env.COUNTERLESS_WORKER_CONCURRENCY ?? 2)
+    concurrency: Number(process.env.COUNTEROS_WORKER_CONCURRENCY ?? 2)
   }
 );
 

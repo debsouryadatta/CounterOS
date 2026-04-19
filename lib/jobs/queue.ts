@@ -5,7 +5,7 @@ import IORedis from "ioredis";
 import { createJobIdempotencyKey } from "./idempotency";
 import { type JobPayload, parseJobPayload } from "./payloads";
 
-export const COUNTERLESS_QUEUE_NAME = "counterless-work";
+export const COUNTEROS_QUEUE_NAME = "counteros-work";
 
 let redisConnection: IORedis | null = null;
 let queue: Queue<JobPayload> | null = null;
@@ -28,12 +28,12 @@ export function getRedisConnection() {
   return redisConnection;
 }
 
-export function getCounterlessQueue() {
+export function getCounterOSQueue() {
   if (queue) {
     return queue;
   }
 
-  queue = new Queue<JobPayload>(COUNTERLESS_QUEUE_NAME, {
+  queue = new Queue<JobPayload>(COUNTEROS_QUEUE_NAME, {
     connection: getRedisConnection(),
     defaultJobOptions: {
       attempts: 3,
@@ -49,13 +49,13 @@ export function getCounterlessQueue() {
   return queue;
 }
 
-export async function enqueueCounterlessJob(
+export async function enqueueCounterOSJob(
   payload: JobPayload,
   options: JobsOptions = {}
 ) {
   const parsed = parseJobPayload(payload);
 
-  return getCounterlessQueue().add(parsed.jobType, parsed, {
+  return getCounterOSQueue().add(parsed.jobType, parsed, {
     jobId: createJobIdempotencyKey(parsed.jobType, parsed),
     ...options
   });

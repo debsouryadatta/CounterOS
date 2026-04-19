@@ -10,7 +10,7 @@ export function AuthForm() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("founder@example.com");
-  const [password, setPassword] = useState("counterless-demo");
+  const [password, setPassword] = useState("counteros-demo");
   const [name, setName] = useState("Demo Founder");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -61,7 +61,7 @@ export function AuthForm() {
     <main className="auth-page">
       <section className="auth-panel">
         <div className="auth-copy">
-          <p className="section-kicker">Counterless</p>
+          <p className="section-kicker">CounterOS</p>
           <h1>Sign in to your competitor command center.</h1>
           <p>
             Use the seeded demo account or create a new email/password account.

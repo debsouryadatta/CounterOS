@@ -9,7 +9,7 @@ import {
 } from "@/lib/db/queries";
 import type { AgentActivity, Artifact, ChatMessage, SuggestedCompetitor } from "@/lib/types";
 import { normalizeDomain } from "@/lib/validation/competitors";
-import { buildCounterlessAgentSystemPrompt } from "./prompts";
+import { buildCounterOSAgentSystemPrompt } from "./prompts";
 import {
   agentActivityStepSchema,
   battlecardArtifactSchema,
@@ -36,7 +36,7 @@ export type AgentChatResult = {
   activities: AgentActivity[];
 };
 
-export async function runCounterlessAgentChat(input: {
+export async function runCounterOSAgentChat(input: {
   workspaceId: string;
   userText: string;
   recentMessages: ChatMessage[];
@@ -60,7 +60,7 @@ export async function runCounterlessAgentChat(input: {
   }
 
   const context = getWorkspaceAgentContext(input.workspaceId);
-  const systemPrompt = buildCounterlessAgentSystemPrompt({
+  const systemPrompt = buildCounterOSAgentSystemPrompt({
     productName: context.productProfile?.name,
     productDescription: context.productProfile?.description,
     icp: context.productProfile?.icp,

@@ -1,10 +1,10 @@
-# Counterless Competitor Intelligence Agent For Founders
+# CounterOS Competitor Intelligence Agent For Founders
 
 Prepared: April 19, 2026
 
 ## Refinement Note
 
-Use this document as the expanded product vision for **Counterless**. Use `core-solution-simple-plan.md` as the source of truth for the first implementation.
+Use this document as the expanded product vision for **CounterOS**. Use `core-solution-simple-plan.md` as the source of truth for the first implementation.
 
 The first build should not try to ship every capability below. It should prove the core loop first:
 
@@ -15,14 +15,14 @@ Signal -> evidence -> interpretation -> counter-move -> founder decision
 ## One-Line Idea
 
 ```text
-Counterless is an AI agent that tracks your competitors in real time and tells you what to do next.
+CounterOS is an AI agent that tracks your competitors in real time and tells you what to do next.
 ```
 
 ## Short Pitch
 
 Founders do not lose because they lack competitor data. They lose because they notice competitor moves too late, misread what those moves mean, or fail to respond.
 
-Counterless monitors competitor activity across websites, pricing, product launches, hiring, funding, people movement, customer sentiment, and AI/search visibility. It then explains what changed, why it matters, and what the founder should do next.
+CounterOS monitors competitor activity across websites, pricing, product launches, hiring, funding, people movement, customer sentiment, and AI/search visibility. It then explains what changed, why it matters, and what the founder should do next.
 
 ## Core Problem
 
@@ -35,7 +35,7 @@ Counterless monitors competitor activity across websites, pricing, product launc
 
 ## Core Solution
 
-Build Counterless as a founder-first competitor intelligence agent that:
+Build CounterOS as a founder-first competitor intelligence agent that:
 
 - Watches competitors continuously.
 - Discovers new and adjacent competitors automatically.
@@ -544,7 +544,7 @@ An AI chief of staff for competitor moves.
 ```text
 Founders do not need another dashboard of competitor updates. They need to know which competitor moves matter and what to do next.
 
-Counterless monitors competitors across product, pricing, hiring, people, funding, positioning, customer sentiment, and AI visibility. Crustdata powers the company and people intelligence layer. The agent then scores every signal, explains the strategic impact, and recommends the next counter-move.
+CounterOS monitors competitors across product, pricing, hiring, people, funding, positioning, customer sentiment, and AI visibility. Crustdata powers the company and people intelligence layer. The agent then scores every signal, explains the strategic impact, and recommends the next counter-move.
 
 It is not just competitor tracking. It is a competitive operating system for founders.
 ```
@@ -554,13 +554,13 @@ It is not just competitor tracking. It is a competitive operating system for fou
 The final product name is:
 
 ```text
-Counterless
+CounterOS
 ```
 
 Working tagline:
 
 ```text
-Most tools tell you what changed. Counterless tells you what changed, why it matters, and what counter-move to make next.
+Most tools tell you what changed. CounterOS tells you what changed, why it matters, and what counter-move to make next.
 ```
 
 ## Best Build Slice
@@ -639,11 +639,11 @@ Locally, run Redis with Docker Compose. In production, if the app is hosted on V
 Build this idea as:
 
 ```text
-Counterless: a competitor intelligence agent for founders that tracks competitor moves, explains why they matter, and recommends what to do next.
+CounterOS: a competitor intelligence agent for founders that tracks competitor moves, explains why they matter, and recommends what to do next.
 ```
 
 The strongest winning angle:
 
 ```text
-Most tools tell you what changed. Counterless tells you what changed, why it matters, and what counter-move to make next.
+Most tools tell you what changed. CounterOS tells you what changed, why it matters, and what counter-move to make next.
 ```

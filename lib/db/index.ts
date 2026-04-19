@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 
 type DatabaseGlobal = typeof globalThis & {
-  __counterlessSqlite?: Database.Database;
+  __counterosSqlite?: Database.Database;
 };
 
 function sqlitePath() {
@@ -16,14 +16,14 @@ function sqlitePath() {
 const globalForDb = globalThis as DatabaseGlobal;
 
 const sqlite =
-  globalForDb.__counterlessSqlite ??
+  globalForDb.__counterosSqlite ??
   new Database(sqlitePath());
 
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
 
 if (process.env.NODE_ENV !== "production") {
-  globalForDb.__counterlessSqlite = sqlite;
+  globalForDb.__counterosSqlite = sqlite;
 }
 
 export const db = drizzle(sqlite, { schema });

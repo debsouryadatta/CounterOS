@@ -4,7 +4,7 @@ import { createUser, findUserByEmail } from "@/lib/db/queries";
 
 async function main() {
   const email = (process.env.SEED_USER_EMAIL ?? "founder@example.com").toLowerCase();
-  const password = process.env.SEED_USER_PASSWORD ?? "counterless-demo";
+  const password = process.env.SEED_USER_PASSWORD ?? "counteros-demo";
   const name = "Demo Founder";
 
   let user = findUserByEmail(email);
@@ -20,7 +20,7 @@ async function main() {
 
   createDefaultWorkspaceForUser(user.id, user.email, user.name);
 
-  console.log(`Seeded Counterless demo user: ${email}`);
+  console.log(`Seeded CounterOS demo user: ${email}`);
   console.log(`Demo password: ${password}`);
 }
 

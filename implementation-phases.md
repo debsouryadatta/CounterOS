@@ -1,8 +1,8 @@
-# Counterless Implementation Phases
+# CounterOS Implementation Phases
 
 Prepared: April 19, 2026
 
-This file is the build roadmap for Counterless. Keep `plans/core-solution-simple-plan.md` as the product source of truth, and use this file to track implementation phases.
+This file is the build roadmap for CounterOS. Keep `plans/core-solution-simple-plan.md` as the product source of truth, and use this file to track implementation phases.
 
 ## North Star Loop
 
@@ -20,7 +20,7 @@ Goal: make the build executable and preserve context for future threads.
 
 Deliverables:
 
-- Final product name locked as Counterless.
+- Final product name locked as CounterOS.
 - MVP scope documented in `plans/core-solution-simple-plan.md`.
 - Implementation phases documented in this file.
 - Crustdata documentation map documented in `plans/crustdata-docs-index.md`.
@@ -35,12 +35,12 @@ Acceptance criteria:
 
 Status: completed
 
-Goal: build the first usable Counterless dashboard with mock data and no external API dependency.
+Goal: build the first usable CounterOS dashboard with mock data and no external API dependency.
 
 Deliverables:
 
 - Next.js App Router project with TypeScript.
-- App shell for Counterless.
+- App shell for CounterOS.
 - Mock dashboard data model in local files.
 - Main views:
   - Overview
@@ -58,7 +58,7 @@ Deliverables:
 
 Acceptance criteria:
 
-- User can run the app locally and see the end-to-end Counterless workflow.
+- User can run the app locally and see the end-to-end CounterOS workflow.
 - No Crustdata or OpenAI key is required.
 - The first screen is the actual product experience, not a marketing landing page.
 
@@ -166,7 +166,7 @@ Acceptance criteria:
 
 Status: mostly completed
 
-Goal: make Agent Chat a real control surface for the core Counterless workflow.
+Goal: make Agent Chat a real control surface for the core CounterOS workflow.
 
 Deliverables:
 
@@ -220,7 +220,7 @@ Implementation guidance:
 
 Acceptance criteria:
 
-- Counterless can show a signal like "Competitor is hiring enterprise AEs in the US."
+- CounterOS can show a signal like "Competitor is hiring enterprise AEs in the US."
 - The signal includes evidence, source, timestamp, confidence, and recommended action.
 
 ## Phase 7: Web Context And Page Signals
@@ -245,7 +245,7 @@ Implementation guidance:
 Acceptance criteria:
 
 - User can track one competitor URL.
-- Counterless can show a page-change signal with evidence and explanation.
+- CounterOS can show a page-change signal with evidence and explanation.
 
 ## Phase 8: Background Jobs, Scheduling, And Production Hardening
 
@@ -299,8 +299,8 @@ CRUSTDATA_API_KEY=...
 Recommended for deployed environments:
 
 ```env
-AUTH_URL=https://your-counterless-domain.com
-NEXT_PUBLIC_APP_URL=https://your-counterless-domain.com
+AUTH_URL=https://your-counteros-domain.com
+NEXT_PUBLIC_APP_URL=https://your-counteros-domain.com
 ```
 
 Optional for demo seeding:
