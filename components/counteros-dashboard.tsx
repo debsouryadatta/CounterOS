@@ -1594,18 +1594,10 @@ function AgentView({
   }, [messages, status]);
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-5" aria-labelledby="agent-title">
-      <PageHeader
-        kicker="Agent chat"
-        title="Ask the agent to run the workspace, step by step."
-        description="The conversation shows thinking, tool calls, approvals, created data, and the final response in one continuous stream."
-      >
-        <StatusBadge tone={isBusy ? "info" : "success"} label={isBusy ? "Running" : "Ready"} />
-      </PageHeader>
-
+    <section className="flex min-h-0 flex-1 flex-col" aria-label="Agent chat">
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border-0 shadow-sm">
-        <CardHeader className="shrink-0 border-b bg-card/95 px-5 py-4">
-          <div className="flex items-start justify-between gap-4 max-[720px]:grid">
+        <CardHeader className="shrink-0 border-b bg-card/95 px-5 py-3">
+          <div className="flex items-center justify-between gap-4 max-[720px]:grid">
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-accent text-primary">
@@ -1613,9 +1605,6 @@ function AgentView({
                 </span>
                 <span className="truncate">Workspace operator</span>
               </CardTitle>
-              <CardDescription className="mt-1">
-                Messages, tool steps, and final responses stay inside this thread.
-              </CardDescription>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-2 max-[720px]:justify-start">
               <StatusBadge tone={isBusy ? "info" : "success"} label={isBusy ? "Streaming" : "Ready"} />
